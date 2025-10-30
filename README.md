@@ -10,7 +10,7 @@ My goal is to create an efficient system for identifying and neutralizing ideolo
 ### 1. **Hybrid Dataset Augmentation**
 We supplement the original **WNC dataset** with **synthetic biased/neutral pairs** generated via the Gemini API.
 
-### 2. ****
+### 2. ** **
 
 ### 3. **Robust Evaluation Metrics**
 We move beyond BLEU and Accuracy to introduce:
@@ -25,28 +25,11 @@ These better measure how well the model preserves meaning while removing bias.
 
 A **Streamlit** web app (`app.py`) is included for live demonstrations. Also, the Google Drive link for the project demo presentation is also attached.
 
+
 - **Input Options:** Direct text input or file uploads (`.txt`, `.pdf`, `.docx`)
 - **Output:** Complete analysis with bias classification, neutralized output, and evaluation metrics.
 
----
-
-## Project Contributions
-
-This project is an **adaptation**, not a replication, of the original work.
-
-### Accessibility over Compute
-- The original paper required an NVIDIA **TITAN X** for ~10 hours.
-- Our model fine-tunes in **under 2 hours on a free Kaggle T4 GPU**.
-
-### Addressing the “Evaluation Gap”
-We expand evaluation with two new composite metrics:
-
-- **Semantic Similarity**: Weighted average of SBERT cosine similarity and Jaccard similarity.
-- **Aggregate Bias Score**: Combines model confidence, lexicon-based subjectivity, and an external ideology classifier.
-
-### Superior Generation Accuracy
-Using a pre-trained checkpoint and a hybrid dataset (10 epochs of fine-tuning), our model achieves:
-- **Exact Match Accuracy: 57.2%**, outperforming the original paper’s 45.8%.
+This is the google drive link to the video presentation on this project  :  [Video presentation](https://drive.google.com/file/d/1b3CiuCuPer1fnQcKUnPw5giUgIsqcqCB/view?usp=sharing)
 
 ---
 
@@ -54,8 +37,7 @@ Using a pre-trained checkpoint and a hybrid dataset (10 epochs of fine-tuning), 
 
 ```
 .
-├── app.py                # Streamlit web application
-├── backend.py            # Mock backend for the Streamlit app
+├── app.py                
 ├── data/
 │   ├── biased.full
 │   ├── biased.word.dev
@@ -80,24 +62,16 @@ Using a pre-trained checkpoint and a hybrid dataset (10 epochs of fine-tuning), 
 
 ### Clone the Repository
 ```
-git clone https://github.com/your-username/your-repo-name.git
-cd your-repo-name
-```
-
-### Create a Virtual Environment (Recommended)
-```
-python3 -m venv venv
-source venv/bin/activate
+git clone [https://github.com/shadowPunch/Ground-Truth-inference](https://github.com/shadowPunch/Ground-Truth-inference)
+cd Ground-Truth-inference
 ```
 
 ### Install Dependencies
-*(Note: `requirements.txt` is inside the `scripts/` directory.)*
 ```
 pip install -r scripts/requirements.txt
 ```
 
-### Download NLTK Data
-*(Required for Jaccard Similarity and tokenization)*  
+### Download NLTK Data 
 ```
 python -m nltk.downloader punkt
 ```
@@ -115,14 +89,13 @@ python scripts/setup_lexicons.py
 
 ## How to Run
 
-### 1. (Optional) Generate Synthetic Data
+### 1. Generate Synthetic Data
 Augment the dataset using the **Gemini API**.
 
 ```
 export GEMINI_API_KEY="your-api-key-here"
 python scripts/datafile.py
 ```
-*(Modify `scripts/config.py` to point `TRAIN_FILE` to the new synthetic file.)*
 
 ### 2. Train the Model
 ```
@@ -148,7 +121,6 @@ Runs evaluation metrics:
 ```
 streamlit run app.py
 ```
-Your browser will open automatically.
 
 ---
 
@@ -183,13 +155,12 @@ Quantifies residual bias from 0 (neutral) to 1 (biased):
 | **Metric** | **Pryzant et al. (Modular)** | **Our Adapted Model** |
 |-------------|------------------------------|------------------------|
 | **Hardware** | NVIDIA TITAN X | Kaggle T4 × 2 |
-| **Training Time** | ~10 hours | ~1.5 hours |
-| **Generation Accuracy** | 45.8% | **57.2%** |
-| **BLEU Score** | 45.8 | ~43.5 |
+| **Training Time** | ~10 hours | ~6 hours |
+| **Generation Accuracy** | 45.8% | **37.2%** |
 | **Semantic Similarity** | (Not Measured) | **0.84** |
 | **Bias Score (Post-Neutral)** | (Human-Judged) | **0.31 (Low)** |
 
-Our model’s 57.2% accuracy and 0.84 semantic similarity show effective bias reduction while maintaining factual integrity.
+Our model’s 37.2% accuracy and 0.84 semantic similarity show effective bias reduction while maintaining factual integrity.
 
 ---
 
@@ -202,9 +173,6 @@ In *Proceedings of the AAAI Conference on Artificial Intelligence.*
 [https://arxiv.org/abs/2004.09986](https://arxiv.org/abs/2004.09986)
 
 ---
-## Demo link
-
-This is the google drive link to the video presentation on this project  :  [Video presentation](https://drive.google.com/file/d/1b3CiuCuPer1fnQcKUnPw5giUgIsqcqCB/view?usp=sharing)
 
 ## License
 
