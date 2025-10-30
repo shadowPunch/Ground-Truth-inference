@@ -8,11 +8,9 @@ My goal is to create an efficient system for identifying and neutralizing ideolo
 ## Key Modifications
 
 ### 1. **Hybrid Dataset Augmentation**
-We supplement the original **WNC dataset** with **synthetic biased/neutral pairs** generated via the Gemini API.
+Supplement the original **WNC dataset** with **synthetic biased/neutral pairs** generated via the Gemini API.
 
-### 2. ** **
-
-### 3. **Robust Evaluation Metrics**
+### 2. **Robust Evaluation Metrics**
 We move beyond BLEU and Accuracy to introduce:
 - **Semantic Similarity Score**
 - **Aggregate Bias Score**
@@ -126,7 +124,7 @@ streamlit run app.py
 
 ## Model Architecture
 
-We implement the **CONCURRENT model (Section 3.2)** from Pryzant et al. (2020):
+Implemented the **CONCURRENT model (Section 3.2)** from Pryzant et al. (2020):
 
 - **Encoder:** Pre-trained `bert-base-uncased`, producing hidden states from biased input.  
 - **Decoder:** Attentional LSTM that uses the encoder’s [CLS] token for initialization and attends to hidden states for token-by-token neutralization.  
@@ -138,15 +136,16 @@ We implement the **CONCURRENT model (Section 3.2)** from Pryzant et al. (2020):
 
 ### Semantic Similarity (Sim)
 A weighted combination ensuring factual preservation:
-\[
+$$
 \text{Sim}(S_{\text{orig}}, S_{\text{neut}}) = (0.8 \times \text{Sim}_{\text{SBERT}}) + (0.2 \times \text{Sim}_{\text{Jaccard}})
-\]
+$$
 
 ### Aggregate Bias Score (Bias)
 Quantifies residual bias from 0 (neutral) to 1 (biased):
-\[
+$$
 \text{Bias}(S) = \frac{P_{\text{detector}} + S_{\text{lexicon}} + (1 - P_{\text{neutral}})}{3}
-\]
+$$
+
 
 ---
 
