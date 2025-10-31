@@ -60,7 +60,7 @@ This is the google drive link to the video presentation on this project  :  [Vid
 
 ### Clone the Repository
 ```
-git clone [https://github.com/shadowPunch/Ground-Truth-inference](https://github.com/shadowPunch/Ground-Truth-inference)
+git clone https://github.com/shadowPunch/Ground-Truth-inference
 cd Ground-Truth-inference
 ```
 
@@ -69,10 +69,6 @@ cd Ground-Truth-inference
 pip install -r scripts/requirements.txt
 ```
 
-### Download NLTK Data 
-```
-python -m nltk.downloader punkt
-```
 
 ### Get the Data
 Download the WNC dataset from the [original paper’s repository](https://github.com/rpryzant/neutralizing-bias)  
