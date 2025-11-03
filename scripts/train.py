@@ -1,166 +1,128 @@
+import os
+import sys
+import time
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.nn.utils import clip_grad_norm_
-from tqdm import tqdm
-import config
-from data_loader import (
-    tokenizer,
-    NeutralDataset,
-    NeutralizationDataset,
-    create_data_loader,
-    PAD_TOKEN_ID
-)
-from model import Encoder, Decoder, ConcurrentModel
-from utils import TokenWeightedLoss, save_checkpoint, load_checkpoint
+from torch.optim import AdamW
+from transformers import BertModel, BertConfig, BertTokenizer
 
-def pretrain_epoch(model, dataloader, optimizer, criterion, device):
-    """Runs one epoch of pre-training (denoising autoencoder)"""
-    model.train()
-    epoch_loss = 0
-    
-    progress_bar = tqdm(dataloader, desc="Pre-training", leave=False)
-    
-    for batch in progress_bar:
-        source_ids = batch['source_ids'].to(device)
-        source_mask = batch['source_mask'].to(device)
-        target_ids = batch['target_ids'].to(device)
-        
-        optimizer.zero_grad()
-        
-        # Use 100% teacher forcing for pre-training
-        outputs = model(source_ids, source_mask, target_ids, teacher_forcing_ratio=1.0)
-        
-        # outputs: [batch, target_len, vocab_size]
-        # target_ids: [batch, target_len]
-        
-        # Flatten for loss calculation
-        # Skip <CLS> token (index 0) in loss
-        output_dim = outputs.shape[-1]
-        outputs_flat = outputs[:, 1:].reshape(-1, output_dim)
-        targets_flat = target_ids[:, 1:].reshape(-1)
-        
-        loss = criterion(outputs_flat, targets_flat)
-        loss.backward()
-        
-        clip_grad_norm_(model.parameters(), config.GRAD_CLIP)
-        optimizer.step()
-        
-        epoch_loss += loss.item()
-        progress_bar.set_postfix(loss=loss.item())
-        
-    return epoch_loss / len(dataloader)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-def finetune_epoch(model, dataloader, optimizer, criterion, device):
-    """Runs one epoch of fine-tuning (neutralization)"""
-    model.train()
-    epoch_loss = 0
-    
-    progress_bar = tqdm(dataloader, desc="Fine-tuning", leave=False)
-    
-    for batch in progress_bar:
-        source_ids = batch['source_ids'].to(device)
-        source_mask = batch['source_mask'].to(device)
-        target_ids = batch['target_ids'].to(device)
-        
-        optimizer.zero_grad()
-        
-        outputs = model(
-            source_ids, 
-            source_mask, 
-            target_ids, 
-            teacher_forcing_ratio=config.TEACHER_FORCING_RATIO
-        )
-        
-        # Custom weighted loss calculation
-        # Skip <CLS> token (index 0) in loss
-        loss = criterion(
-            predictions=outputs[:, 1:, :],
-            targets=target_ids[:, 1:],
-            source_ids=source_ids
-        )
-        
-        loss.backward()
-        
-        clip_grad_norm_(model.parameters(), config.GRAD_CLIP)
-        optimizer.step()
-        
-        epoch_loss += loss.item()
-        progress_bar.set_postfix(loss=loss.item())
-        
-    return epoch_loss / len(dataloader)
+try:
+    from scripts.config import Config, DEVICE
+    from scripts.model import BiasNeutralizationModel, LSTMDecoder
+    import scripts.util as util
+except ImportError:
+    print("Error: Could not import from 'scripts' directory. Make sure config.py, model.py, util.py exist there.", file=sys.stderr)
+    sys.exit(1)
+
 
 def main():
-    device = config.DEVICE
-    print(f"Using device: {device}")
+    config = Config()
+    print(f"Using device: {DEVICE}")
 
-    # --- Initialize Model ---
-    encoder = Encoder().to(device)
-    decoder = Decoder(
-        vocab_size=tokenizer.vocab_size,
-        hidden_dim=config.HIDDEN_DIM,
-        lstm_layers=config.LSTM_LAYERS,
+    # Load tokenizer
+    print(f"Loading BERT tokenizer from local file: {config.BERT_VOCAB_FILE}...")
+    if not os.path.exists(config.BERT_VOCAB_FILE):
+        print(f"ERROR: BERT vocab file not found at {config.BERT_VOCAB_FILE}", file=sys.stderr)
+        return
+    tokenizer = BertTokenizer(
+        vocab_file=config.BERT_VOCAB_FILE,
+        do_lower_case=True
+    )
+    vocab_size = tokenizer.vocab_size
+    pad_token_id = tokenizer.pad_token_id
+
+    # Load training and dev data
+    print(f"Loading training data from: {config.TRAIN_FILE}...")
+    train_loader = util.create_dataloader(
+        config.TRAIN_FILE,
+        tokenizer,
+        config.MAX_SEQ_LEN,
+        config.BATCH_SIZE,
+        shuffle=True
+    )
+    print(f"Loading validation data from: {config.DEV_FILE}...")
+    dev_loader = util.create_dataloader(
+        config.DEV_FILE,
+        tokenizer,
+        config.MAX_SEQ_LEN,
+        config.BATCH_SIZE,
+        shuffle=False
+    )
+
+    # Build Model
+    print("Building model architecture...")
+    bert_config = BertConfig.from_pretrained(config.BERT_MODEL_NAME)
+    bert_encoder = BertModel.from_pretrained(config.BERT_MODEL_NAME, config=bert_config).to(DEVICE)
+
+    decoder = LSTMDecoder(
+        vocab_size=vocab_size,
+        embed_dim=config.EMBED_DIM,
+        hidden_dim=config.LSTM_HIDDEN_DIM,
+        num_layers=config.LSTM_LAYERS,
         dropout=config.DROPOUT
-    ).to(device)
-    model = ConcurrentModel(encoder, decoder, tokenizer, device).to(device)
-    
-    optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
-    
-    # --- 1. Pre-training Phase ---
-    print("--- Starting Pre-training Phase ---")
-    pretrain_dataset = NeutralDataset(
-        config.WNC_NEUTRAL_PATH, tokenizer, config.MAX_LEN
-    )
-    pretrain_loader = create_data_loader(
-        pretrain_dataset, config.BATCH_SIZE, shuffle=True
-    )
-    
-    # Standard Cross-Entropy Loss for pre-training
-    pretrain_criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN_ID)
-    
-    for epoch in range(config.PRETRAIN_EPOCHS):
-        train_loss = pretrain_epoch(
-            model, pretrain_loader, optimizer, pretrain_criterion, device
-        )
-        print(f"Pre-train Epoch {epoch+1}/{config.PRETRAIN_EPOCHS} | Loss: {train_loss:.4f}")
-        
-    # Save the pre-trained model
-    save_checkpoint(model, optimizer, config.PRETRAIN_SAVE_PATH)
-    print("Pre-training complete. Model saved.")
+    ).to(DEVICE)
 
-    # --- 2. Fine-tuning Phase ---
-    print("\n--- Starting Fine-tuning Phase ---")
-    
-    # Reload the best pre-trained model (or just continue)
-    # model, optimizer = load_checkpoint(model, optimizer, config.PRETRAIN_SAVE_PATH)
+    model = BiasNeutralizationModel(encoder=bert_encoder, decoder=decoder, vocab_size=vocab_size).to(DEVICE)
 
-    finetune_dataset = NeutralizationDataset(
-        config.WNC_BIASED_WORD_PATH, tokenizer, config.MAX_LEN
-    )
-    finetune_loader = create_data_loader(
-        finetune_dataset, config.BATCH_SIZE, shuffle=True
-    )
-    
-    # Custom Token-Weighted Loss for fine-tuning
-    finetune_criterion = TokenWeightedLoss(
-        alpha=config.TOKEN_WEIGHT_ALPHA,
-        pad_token_id=PAD_TOKEN_ID,
-        ignore_index=PAD_TOKEN_ID
-    )
-    
-    best_loss = float('inf')
-    for epoch in range(config.FINETUNE_EPOCHS):
-        train_loss = finetune_epoch(
-            model, finetune_loader, optimizer, finetune_criterion, device
-        )
-        print(f"Fine-tune Epoch {epoch+1}/{config.FINETUNE_EPOCHS} | Loss: {train_loss:.4f}")
-        
-        if train_loss < best_loss:
-            best_loss = train_loss
-            save_checkpoint(model, optimizer, config.FINETUNE_SAVE_PATH)
-            
-    print(f"Fine-tuning complete. Best model saved to {config.FINETUNE_SAVE_PATH}")
+    # Setup optimizer and scheduler
+    optimizer = AdamW(model.parameters(), lr=config.LEARNING_RATE)
+    max_steps_per_epoch = len(train_loader) if config.MAX_STEPS_PER_EPOCH <= 0 else min(len(train_loader), config.MAX_STEPS_PER_EPOCH)
+    total_training_steps = max_steps_per_epoch * config.EPOCHS
+    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=total_training_steps)
+
+    loss_fn = util.build_token_weighted_loss(config.LOSS_ALPHA, pad_token_id)
+
+    best_val_loss = float('inf')
+    print(f"\n--- Starting Training for {config.EPOCHS} epochs ---")
+    for epoch in range(1, config.EPOCHS + 1):
+        model.train()
+        epoch_loss = 0
+        for step, batch in enumerate(train_loader, 1):
+            if config.MAX_STEPS_PER_EPOCH > 0 and step > config.MAX_STEPS_PER_EPOCH:
+                print(f"Reached max steps {config.MAX_STEPS_PER_EPOCH} for epoch {epoch}")
+                break
+
+            optimizer.zero_grad()
+            input_ids = batch['input_ids'].to(DEVICE)
+            attention_mask = batch['attention_mask'].to(DEVICE)
+            decoder_input_ids = batch['decoder_input_ids'].to(DEVICE)
+            target_labels = batch['target_labels'].to(DEVICE)
+
+            logits = model(input_ids, attention_mask, decoder_input_ids, target_labels)
+            loss = loss_fn(logits, target_labels, batch['src_text'], batch['tgt_text'], tokenizer)
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+            epoch_loss += loss.item()
+
+            if step % 100 == 0 or step == max_steps_per_epoch:
+                print(f"Epoch {epoch}/{config.EPOCHS}, Step {step}/{max_steps_per_epoch}, Loss: {loss.item():.4f}")
+
+        avg_train_loss = epoch_loss / max_steps_per_epoch
+
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            val_scores = util.calculate_metrics(model, dev_loader, loss_fn, tokenizer, None, None)
+
+        print(f"\n--- Epoch {epoch} Summary ---")
+        print(f"Train Loss: {avg_train_loss:.4f}")
+        print(f"Val Loss:   {val_scores['loss']:.4f} | Val Acc: {val_scores['accuracy']*100:.2f}% | Val BLEU: {val_scores['bleu']*100:.2f}")
+        print("-" * 30)
+
+        # Save best model
+        if val_scores['loss'] < best_val_loss:
+            best_val_loss = val_scores['loss']
+            torch.save(model.state_dict(), config.MODEL_SAVE_PATH)
+            print(f"Validation loss improved, model saved to: {config.MODEL_SAVE_PATH}")
+
+    print("\n--- Training Complete ---")
+
 
 if __name__ == "__main__":
     main()
-
