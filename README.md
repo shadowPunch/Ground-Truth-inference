@@ -3,14 +3,12 @@
 This project adapts the **CONCURRENT** model from the paper  **"Automatically Neutralizing Subjective Bias in Text" (Pryzant et al., 2020)**.  
 My goal is to create an efficient system for identifying and neutralizing ideological bias in news text that can be trained and deployed in **resource-constrained environments** (e.g., free Kaggle GPUs) instead of relying on high-end, inaccessible hardware.
 
----
+### Key Modifications
 
-## Key Modifications
-
-### 1. **Hybrid Dataset Augmentation**
+#### 1. **Hybrid Dataset Augmentation**
 Supplement the original **WNC dataset** with **synthetic biased/neutral pairs** generated via the Gemini API.
 
-### 2. **Robust Evaluation Metrics**
+#### 2. **Robust Evaluation Metrics**
 We move beyond BLEU and Accuracy to introduce:
 - **Semantic Similarity Score**
 - **Aggregate Bias Score**
