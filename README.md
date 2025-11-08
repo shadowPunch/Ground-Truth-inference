@@ -22,7 +22,7 @@ These better measure how well the model preserves meaning while removing bias.
 A **Streamlit** web app (`app.py`) is included for live demonstrations. Also, the Google Drive link for the project demo presentation is also attached.
 
 
-This is the google drive link to the video presentation on this project  :  [Video presentation](https://drive.google.com/file/d/1b3CiuCuPer1fnQcKUnPw5giUgIsqcqCB/view?usp=sharing)
+This is the google drive link to the video presentation on this project  :  [Video presentation](https://drive.google.com/drive/folders/1pi5l832wiVKQa8GRIOSAmEoMdDNGdayc)
 
 ---
 
