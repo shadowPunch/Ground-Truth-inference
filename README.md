@@ -160,7 +160,7 @@ This project adapts and extends the foundational work of:
 **Pryzant, R., Martinez, R. D., Dass, N., Kurohashi, S., Jurafsky, D., & Yang, D. (2020).**  
 *Automatically Neutralizing Subjective Bias in Text.*  
 In *Proceedings of the AAAI Conference on Artificial Intelligence.*  
-[https://arxiv.org/abs/2004.09986](https://arxiv.org/abs/2004.09986)
+[https://arxiv.org/abs/1911.09709](https://arxiv.org/abs/1911.09709)
 
 ---
 
