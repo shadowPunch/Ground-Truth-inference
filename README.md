@@ -127,15 +127,14 @@ Implemented the **CONCURRENT model (Section 3.2)** from Pryzant et al. (2020):
 
 ### Semantic Similarity (Sim)
 A weighted combination ensuring factual preservation:
-$$
-\text{Sim}(S_{\text{orig}}, S_{\text{neut}}) = (0.8 \times \text{Sim}_{\text{SBERT}}) + (0.2 \times \text{Sim}_{\text{Jaccard}})
-$$
+
+Sim(S_orig, S_neut) = (0.8 × Sim_SBERT) + (0.2 × Sim_Jaccard)
 
 ### Aggregate Bias Score (Bias)
 Quantifies residual bias from 0 (neutral) to 1 (biased):
-$$
-\text{Bias}(S) = \frac{P_{\text{detector}} + S_{\text{lexicon}} + (1 - P_{\text{neutral}})}{3}
-$$
+
+Bias(S) = (P_detector + S_lexicon + (1 - P_neutral)) / 3
+
 
 
 ---
