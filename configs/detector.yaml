@@ -1,0 +1,22 @@
+# Stage-1 detector (§5.1). Train twice with different output_dir/seed to get
+# a pipeline instance and a separate, never-reused independent eval instance.
+backbone: launch/POLITICS
+fallback_backbone: distilroberta-base
+max_seq_length: 128
+learning_rate: 2.0e-5
+weight_decay: 0.01
+train_batch_size: 16
+eval_batch_size: 32
+num_epochs: 5
+warmup_ratio: 0.06
+span_loss_weight: 1.0
+sentence_loss_weight: 1.0
+output_dir: runs/detector
+checkpoint_every_steps: 200
+compute:
+  mixed_precision: bf16 # use fp16 on a P100 (no tensor cores, see §7.2)
+  gradient_checkpointing: true
+  optimizer: adamw_8bit
+  gradient_accumulation_steps: 1
+  max_seq_length: 128
+  seed: 42

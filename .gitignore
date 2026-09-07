@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Large/derived artifacts — reproducible via scripts/, not checked in.
+data_cache/
+runs/
+*.ckpt
+*.bin
+*.safetensors

@@ -1,0 +1,44 @@
+[project]
+name = "biasneut"
+version = "0.1.0"
+description = "Detect-then-edit lexical political bias neutralization for news text under compute constraints"
+requires-python = ">=3.10"
+readme = "README.md"
+dependencies = [
+  "torch>=2.3",
+  "transformers>=4.42",
+  "datasets>=2.20",
+  "accelerate>=0.32",
+  "peft>=0.11",
+  "sentencepiece>=0.2",
+  "sentence-transformers>=3.0",
+  "evaluate>=0.4",
+  "sacrebleu>=2.4",
+  "sacremoses>=0.1.1",
+  "bert-score>=0.3.13",
+  "scikit-learn>=1.4",
+  "scipy>=1.13",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "pyyaml>=6.0",
+  "tqdm>=4.66",
+  "nltk>=3.8",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+qlora = ["bitsandbytes>=0.43"]
+llm = ["anthropic>=0.30"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["integration: slower tests that download real (small) external models"]

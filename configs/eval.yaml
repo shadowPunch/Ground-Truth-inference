@@ -1,0 +1,9 @@
+# Evaluation harness (§6).
+independent_classifier_dir: runs/detector_eval_independent
+fluency_lm: gpt2
+grammaticality_model: textattack/roberta-base-CoLA
+sbert_model: sentence-transformers/all-MiniLM-L6-v2
+bertscore_model: roberta-large
+num_bootstrap_samples: 1000
+seeds: [13, 42, 1337]
+output_dir: runs/eval
