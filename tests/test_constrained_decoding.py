@@ -46,6 +46,34 @@ def test_non_flagged_token_ids_excludes_flagged_words():
     assert isinstance(flagged_only_ids, set)
 
 
+def test_copy_bias_maps_each_beam_row_to_its_own_source():
+    # generate() expands the batch to (num_sources * num_beams) rows via
+    # repeat_interleave, so row r belongs to source r // num_beams. Indexing
+    # by source position instead biased sentence i's beam k toward sentence
+    # i+k's vocabulary and left rows past num_sources unbiased entirely —
+    # which is what drove real editor outputs to be unrelated to their input.
+    vocab_size = 10
+    num_beams = 4
+    allowed = [{2}, {7}]
+    processor = CopyBiasLogitsProcessor(allowed, bias_strength=3.0)
+
+    scores = torch.zeros(len(allowed) * num_beams, vocab_size)
+    out = processor(torch.zeros(scores.shape[0], 1, dtype=torch.long), scores.clone())
+
+    for row in range(scores.shape[0]):
+        expected_id = 2 if row // num_beams == 0 else 7
+        boosted = (out[row] != 0).nonzero().flatten().tolist()
+        assert boosted == [expected_id], f"row {row} biased toward the wrong source"
+
+
+def test_copy_bias_greedy_single_row_per_source_still_correct():
+    processor = CopyBiasLogitsProcessor([{1}, {2}], bias_strength=1.0)
+    scores = torch.zeros(2, 5)
+    out = processor(torch.zeros(2, 1, dtype=torch.long), scores.clone())
+    assert (out[0] != 0).nonzero().flatten().tolist() == [1]
+    assert (out[1] != 0).nonzero().flatten().tolist() == [2]
+
+
 def test_non_flagged_token_ids_empty_when_all_flagged():
     tokenizer = AutoTokenizer.from_pretrained(TINY_BACKBONE)
     allowed = non_flagged_token_ids(tokenizer, "bad awful terrible", ["B-BIAS", "I-BIAS", "I-BIAS"])

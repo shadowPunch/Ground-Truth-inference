@@ -26,16 +26,43 @@ from biasneut.data.tokenize_utils import whitespace_tokenize
 
 
 class CopyBiasLogitsProcessor(LogitsProcessor):
+    """Boosts source-vocabulary logits, one allowed set per *source sentence*.
+
+    ``generate()`` expands the batch to ``num_sources * num_beams`` rows
+    (``repeat_interleave``, so row ``r`` belongs to source ``r // num_beams``).
+    Indexing ``scores`` by source position instead would bias beam ``k`` of
+    sentence ``i`` toward sentence ``i + k``'s vocabulary and leave every row
+    past ``num_sources`` untouched — i.e. actively reward copying words from
+    a *different* sentence.
+    """
+
     def __init__(self, allowed_token_ids_per_batch: list[set[int]], bias_strength: float):
         self.allowed_token_ids_per_batch = allowed_token_ids_per_batch
         self.bias_strength = bias_strength
+        self._index_cache: dict[int, torch.Tensor] = {}
+
+    def _indices(self, source_idx: int, device: torch.device) -> torch.Tensor:
+        """Cached id tensor per source — this runs at every decoding step."""
+        cached = self._index_cache.get(source_idx)
+        if cached is None or cached.device != device:
+            allowed = self.allowed_token_ids_per_batch[source_idx]
+            cached = torch.tensor(sorted(allowed), device=device, dtype=torch.long)
+            self._index_cache[source_idx] = cached
+        return cached
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        for i, allowed in enumerate(self.allowed_token_ids_per_batch):
-            if not allowed:
+        num_sources = len(self.allowed_token_ids_per_batch)
+        if num_sources == 0:
+            return scores
+
+        num_rows = scores.shape[0]
+        beams_per_source = max(1, num_rows // num_sources)
+        for row in range(num_rows):
+            source_idx = min(row // beams_per_source, num_sources - 1)
+            if not self.allowed_token_ids_per_batch[source_idx]:
                 continue
-            idx = torch.tensor(sorted(allowed), device=scores.device, dtype=torch.long)
-            scores[i, idx] = scores[i, idx] + self.bias_strength
+            idx = self._indices(source_idx, scores.device)
+            scores[row, idx] = scores[row, idx] + self.bias_strength
         return scores
 
 
