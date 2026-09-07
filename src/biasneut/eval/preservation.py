@@ -37,6 +37,15 @@ class PreservationScorer:
         """
         references = references or sources
 
+        # A degenerate (empty-string) generation is a real, expected failure
+        # mode for an undertrained seq2seq editor — it should score as a
+        # preservation failure, not crash the whole evaluation run. bert_score's
+        # own empty-string special case (bert_score/utils.py:sent_encode) calls
+        # tokenizer.build_inputs_with_special_tokens([]) directly, which raises
+        # AttributeError on some transformers/tokenizer version combinations;
+        # substituting a non-empty placeholder sidesteps that path entirely.
+        outputs = [o if o.strip() else "(no output generated)" for o in outputs]
+
         bert_out = self._bertscore.compute(
             predictions=outputs, references=references, model_type=self._bertscore_model
         )
