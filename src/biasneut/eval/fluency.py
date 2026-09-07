@@ -38,6 +38,12 @@ class FluencyScorer:
         if not sentence.strip():
             return float("inf")
         encoding = self.lm_tokenizer(sentence, return_tensors="pt").to(self.device)
+        # A single-token sequence has no next-token position to score against,
+        # so the causal-LM loss is NaN (observed from a degenerate one-token
+        # editor output on real data) — treat it the same as empty: maximally
+        # non-fluent, not a silent NaN that poisons the aggregate mean.
+        if encoding["input_ids"].shape[1] < 2:
+            return float("inf")
         out = self.lm(**encoding, labels=encoding["input_ids"])
         return torch.exp(out.loss).item()
 

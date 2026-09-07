@@ -19,3 +19,13 @@ def test_fluent_sentence_has_lower_perplexity_than_word_salad(scorer):
 def test_grammatical_prob_in_range(scorer):
     prob = scorer.grammatical_prob("The committee met on Friday.")
     assert 0.0 <= prob <= 1.0
+
+
+def test_perplexity_single_token_output_is_inf_not_nan(scorer):
+    # A single-token sequence has no next-token position for the causal-LM
+    # loss to score, which makes GPT-2 return a NaN loss (observed from a
+    # real degenerate one-character editor output) — that must not silently
+    # poison an aggregate mean; it should read the same as an empty string.
+    import math
+    assert scorer.perplexity("a") == float("inf")
+    assert not math.isnan(scorer.perplexity("a"))
