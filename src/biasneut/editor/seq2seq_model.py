@@ -64,6 +64,7 @@ class SeqEditor:
         max_new_tokens: int = 128,
         use_constrained_decoding: bool = True,
         copy_bias_strength: float = 2.5,
+        no_repeat_ngram_size: int = 3,
     ) -> list[str]:
         marked = [
             self.task_prefix + mark_text(s, tags)
@@ -79,10 +80,16 @@ class SeqEditor:
                 self.tokenizer, sentences, word_tags_per_sentence, bias_strength=copy_bias_strength
             )
 
+        # The copy-bias boost above pushes up every non-flagged token uniformly
+        # at every step, which without a repetition guard lets beam search loop
+        # on whichever boosted token scores highest (observed: real outputs
+        # collapsing to "protest protest protest..."). no_repeat_ngram_size is
+        # the standard HF safeguard against exactly this.
         output_ids = self.model.generate(
             **inputs,
             num_beams=num_beams,
             max_new_tokens=max_new_tokens,
             logits_processor=logits_processor,
+            no_repeat_ngram_size=no_repeat_ngram_size,
         )
         return self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)

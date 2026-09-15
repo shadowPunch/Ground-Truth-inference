@@ -58,6 +58,22 @@ def test_seq_editor_neutralize_returns_one_output_per_sentence():
     assert all(isinstance(o, str) for o in outputs)
 
 
+def test_seq_editor_neutralize_default_blocks_repeated_trigrams():
+    # The copy-bias boost pushes every non-flagged token up uniformly at every
+    # decoding step, which without a repetition guard lets beam search loop on
+    # whichever boosted token scores highest (observed on real data: output
+    # collapsing to "protest protest protest..."). no_repeat_ngram_size=3 is
+    # the default now specifically to prevent that.
+    editor = SeqEditor.from_pretrained_backbone(TINY_BACKBONE)
+    sentences = ["the regime collapsed under pressure quickly"]
+    word_tags = [["O", "B-BIAS", "O", "O", "O", "O"]]
+
+    outputs = editor.neutralize(sentences, word_tags, num_beams=4, max_new_tokens=40, copy_bias_strength=5.0)
+    token_ids = editor.tokenizer(outputs[0], add_special_tokens=False)["input_ids"]
+    trigrams = [tuple(token_ids[i:i + 3]) for i in range(len(token_ids) - 2)]
+    assert len(trigrams) == len(set(trigrams)), f"repeated trigram in output: {outputs[0]!r}"
+
+
 def test_seq_editor_save_and_load_roundtrip(tmp_path):
     editor = SeqEditor.from_pretrained_backbone(TINY_BACKBONE)
     editor.save(tmp_path)
