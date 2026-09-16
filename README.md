@@ -241,6 +241,74 @@ models and real data sources (BASIL's git-clone/tarball-fallback path
 included) to catch API-version drift and wiring bugs that synthetic mocks
 can't.
 
+## Real Kaggle runs and a known, unresolved generation-instability issue
+
+The full notebook has run to completion on Kaggle (`NvidiaTeslaT4`) multiple
+times on real data at the scale described above (full BABE+BASIL, full WNC).
+Real results: the detector reaches span F1 ~0.35; all editor arms reduce
+detected bias substantially more than the trivial baselines (mean probability
+drop ~0.21-0.23 vs ~0.03/0.0 for `copy_input`/`delete_flagged_word`); Strategy
+A's WNC-pretrain-only checkpoint *is* the "Pryzant off-the-shelf" baseline
+stand-in from §6.3 (see `train_strategy_a.py`'s module docstring).
+
+**Known issue, investigated but not resolved**: a minority of generations
+from the seq2seq editors degenerate (empty string or a single repeated
+token), which poisons `mean_perplexity` to `inf` in the evaluation report.
+Four specific hypotheses were tested and each individually ruled out with
+real evidence (not just reasoning) across five separate full Kaggle runs:
+
+1. `copy_bias_strength` overwhelming the model's own signal — ablated
+   (`use_constrained_decoding=False`) on the same checkpoint; `inf`
+   persisted with and without it.
+2. Missing repetition guard — added `no_repeat_ngram_size=3` to
+   `SeqEditor.neutralize`; only marginal change, `inf` persisted.
+3. Large single-batch padding (312 sources in one `.neutralize()` call,
+   vs. a local reproduction in chunks of 16 that never showed the issue) —
+   added a same-run chunked-vs-single-batch comparison; `inf` in both.
+4. `transformers` version (Kaggle's base image pins `5.0.0`; a local
+   reproduction on `5.15.1` never showed the issue) — pinned the notebook
+   to `5.15.1` explicitly; `inf` persisted regardless.
+
+Also checked and ruled out locally (same checkpoint, direct comparison):
+the detector's own predictions are bit-identical on CPU vs GPU; forcing the
+editor model into `.train()` mode has no effect; leaving gradient
+checkpointing enabled (as `train_seq2seq_editor` does — it's never
+explicitly disabled before the trained editor is used for inference in the
+same session) has no effect; `use_cache` is correctly serialized as `true`
+in the saved config.
+
+What's left unexplained is environment/hardware-specific (Kaggle's T4
+architecture, or the exact `torch` build `2.10.0+cu128` vs. the `2.13.0
++cu130` used in every clean local reproduction) — not something a code
+change in this repository can address, and not something that can be
+isolated further without either a bare T4 outside Kaggle's notebook sandbox
+or accepting the real risk of forcing a `torch` upgrade on top of Kaggle's
+CUDA-matched build (§ the P100 failure earlier in this same investigation
+was exactly that class of mismatch). One untested, cheap idea if this is
+revisited: `num_beams=1` (greedy) instead of beam search for the affected
+arms — beam search is specifically what compounds small floating-point
+differences into large output divergence; greedy decoding follows a single
+path and has no such compounding.
+
+This does **not** mean the trained models are incapable of good output: a
+local reproduction of the exact same checkpoint, on the exact same 312 test
+sentences, produced zero degenerate generations and included genuinely
+well-targeted edits (e.g. `"our bloated, draconian justice system"` →
+`"our justice system"`, keeping everything else intact). The instability is
+real and affects the aggregate metrics in the Kaggle-produced reports, but
+it is not evidence that the underlying trained weights are bad — treat
+`mean_perplexity: inf` in a report as "this run's environment hit the
+issue," not as "this model can't generate."
+
+Given this, further investigation was deliberately stopped in favor of a
+higher-value change: Strategy A now also produces a **domain-adapted**
+checkpoint (`editor_a_adapted`, alongside the unchanged pretrain-only
+baseline `editor_a`) by continuing training on real in-domain BASIL pairs,
+synthesized via detector-guided masking + MLM infill (the same mechanism as
+Strategy C's LEWIS arm) — this is the domain adaptation phase `run_strategy_a`
+already supported via its `adapt_train`/`adapt_dev` parameters but which no
+run before this had ever actually exercised.
+
 ## Data governance (§4.3)
 
 Synthetic (Strategy B) data is training-side only and must never enter the
