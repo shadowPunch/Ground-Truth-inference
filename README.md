@@ -309,6 +309,20 @@ Strategy C's LEWIS arm) — this is the domain adaptation phase `run_strategy_a`
 already supported via its `adapt_train`/`adapt_dev` parameters but which no
 run before this had ever actually exercised.
 
+**Real result** (one Kaggle run, 164 adaptation pairs, 4 epochs — a small
+adaptation set relative to WNC's 53,803 pretrain pairs): a modest, mixed
+effect, not a dramatic fix. SARI improved 7.97 → 9.40 (+18%), BERTScore F1
+and grammaticality both improved slightly; SBERT cosine and BLEU both
+slightly worsened. `mean_perplexity` stayed `inf`, as expected — domain
+adaptation targets edit quality, not the separately-documented generation-
+instability issue above, which is orthogonal to how the model was trained.
+Read as a genuine if small signal that in-domain adaptation helps, not as
+proof either way — one run with this few adaptation pairs isn't enough to
+call it conclusively. Scaling this further (more adaptation data — Strategy
+B with a real `ANTHROPIC_API_KEY` would provide the largest jump the
+proposal's own design anticipates, more epochs, or both) is the natural
+next experiment, not something to over-interpret from a single small run.
+
 ## Data governance (§4.3)
 
 Synthetic (Strategy B) data is training-side only and must never enter the
