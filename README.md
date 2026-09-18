@@ -309,19 +309,35 @@ Strategy C's LEWIS arm) — this is the domain adaptation phase `run_strategy_a`
 already supported via its `adapt_train`/`adapt_dev` parameters but which no
 run before this had ever actually exercised.
 
-**Real result** (one Kaggle run, 164 adaptation pairs, 4 epochs — a small
-adaptation set relative to WNC's 53,803 pretrain pairs): a modest, mixed
-effect, not a dramatic fix. SARI improved 7.97 → 9.40 (+18%), BERTScore F1
-and grammaticality both improved slightly; SBERT cosine and BLEU both
-slightly worsened. `mean_perplexity` stayed `inf`, as expected — domain
-adaptation targets edit quality, not the separately-documented generation-
-instability issue above, which is orthogonal to how the model was trained.
-Read as a genuine if small signal that in-domain adaptation helps, not as
-proof either way — one run with this few adaptation pairs isn't enough to
-call it conclusively. Scaling this further (more adaptation data — Strategy
-B with a real `ANTHROPIC_API_KEY` would provide the largest jump the
-proposal's own design anticipates, more epochs, or both) is the natural
-next experiment, not something to over-interpret from a single small run.
+**Real result, two runs at different scales** — first with 164 adaptation
+pairs (BASIL-only candidates) / 4 epochs, then with 1,055 pairs (BABE+BASIL
+candidates, ~6.4x more) / 8 epochs, both tiny relative to WNC's 53,803
+pretrain pairs:
+
+| metric (adapted vs. pretrain-only, same run) | 164 pairs / 4 epochs | 1,055 pairs / 8 epochs |
+|---|---|---|
+| SARI | +18% | +21% |
+| BERTScore F1 | +0.007 | +0.008 |
+| SBERT cosine | −0.008 | +0.033 |
+| BLEU | −0.036 | +0.04 |
+| P(grammatical) | +0.037 | −0.062 |
+
+SARI and BERTScore F1 improved by a similar relative margin in **both**
+runs — that's a real, reproduced signal, not noise. SBERT cosine, BLEU, and
+grammaticality flip sign between the two runs, which given everything
+already established about run-to-run floating-point variance on this setup
+(see above) is more likely dominated by that noise than by the 6.4x data
+increase — even the *pretrain-only baseline* shifted slightly between the
+two runs (SARI 7.97 → 7.42) purely from re-running the same code.
+`mean_perplexity` stayed `inf` in both, as expected — domain adaptation
+targets edit quality, not the separately-documented generation-instability
+issue above, which is orthogonal to how the model was trained.
+
+Honest read: domain adaptation has a real, modest, reproducible positive
+effect on SARI/BERTScore specifically; scaling the adaptation set 6.4x did
+not produce a proportionally larger effect, and may not be the highest-
+leverage lever left. The proposal's own largest-expected-jump lever —
+Strategy B with a real `ANTHROPIC_API_KEY` — is still untried.
 
 ## Data governance (§4.3)
 
