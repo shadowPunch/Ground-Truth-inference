@@ -68,6 +68,26 @@ class AnthropicClient:
 
 
 @dataclass
+class GeminiClient:
+    """Thin wrapper so the generation loop doesn't depend on the SDK shape."""
+
+    model: str = "gemini-2.5-flash"
+    name: str = "gemini"
+    max_tokens: int = 256
+
+    def __post_init__(self):
+        import os
+
+        from google import genai
+
+        self._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+
+    def generate(self, prompt: str) -> str:
+        resp = self._client.models.generate_content(model=self.model, contents=prompt)
+        return resp.text.strip()
+
+
+@dataclass
 class EchoClient:
     """No-op client for tests/dry-runs: returns the input unchanged so the
     generation/filtering pipeline can be exercised without any API key."""
