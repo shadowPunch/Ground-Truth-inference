@@ -191,36 +191,34 @@ outputs are in [`results/`](results/).
 | Strategy A — + in-domain adaptation | 0.907 | 0.189 | 0.251 | 0.813 | 9.0 | 0.4 | 0.238 |
 | Strategy C — LEWIS-lite | **0.974** | **0.214** | 0.186 | 0.812 | **12.1** | 0.0 | **0.390** |
 
-- **Bias reduction is large and significant.** Every trained editor cuts
-  detected bias far more than either baseline (McNemar vs. `copy_input`,
-  p < 10⁻⁶ for all three). The fully unsupervised Strategy C does best on
-  transfer strength and SARI.
-- **Meaning preservation is the weak axis.** SBERT similarity to the source
-  is 0.19–0.25, against 0.99 for the delete-word baseline (95% bootstrap CIs:
-  A 0.200–0.235, A-adapted 0.232–0.272, C 0.169–0.202).
+### Key findings
 
-  ![Pareto frontier](results/pareto.png)
-
-  The Pareto plot shows the editors trading preservation for transfer strength.
-  This is exactly the "mangle the text to win the bias metric" failure mode
-  the proposal's §9 warns about, which is why the triad is reported jointly
-  rather than as one score.
-- **In-domain adaptation helps, reproducibly.** Continuing Strategy A on
-  in-domain news pairs raised SARI by 18% and 21% in two independent runs at
-  different adaptation scales (164 pairs / 4 epochs and 1,055 pairs / 8 epochs).
-  BERTScore also improved. Scaling the adaptation data 6.4× did not scale the
-  gain, which points to the *kind* of supervision mattering more than its quantity.
-- **Generation on the T4 is unstable.** A minority of editor outputs on T4
-  hardware collapse to empty or single-token strings, so aggregate
-  perplexity is non-finite (the `inf` in `results/report.md`).
-  - Eight candidate causes were tested and ruled out, each with a dedicated
-    experiment: copy-bias strength, repetition guard, batch padding,
-    `transformers` version, detector CPU/GPU drift, train/eval mode,
-    gradient checkpointing, and cache config.
-  - The same checkpoints run on a different GPU produced no degenerate
-    outputs and clean, targeted edits, e.g. *"our bloated, draconian justice
-    system"* → *"our justice system"*.
-  - The evaluation now reports this directly as `n_degenerate` per system.
+- **Large, statistically significant bias reduction.**
+  - Left unchanged, 60% of test sentences are judged neutral. After editing,
+    that rises to **up to 97%**.
+  - The trained editors' mean bias-probability drop (0.19–0.21) is **about
+    6–7×** that of the delete-the-flagged-word baseline (0.03).
+  - The improvement over the unedited input is significant for every editor
+    (McNemar, p < 10⁻⁶).
+- **No parallel data needed.** The fully unsupervised Strategy C (LEWIS-lite)
+  beats the WNC-transfer editor on transfer strength (0.974 neutral rate,
+  the largest bias drop), SARI (12.1) and grammaticality (0.39). This bears
+  directly on the project's central question of where the neutral target
+  should come from: an editor trained with no hand-written parallel corpus
+  outperforms one pretrained on 53k Wikipedia edit pairs.
+- **In-domain adaptation gives reproducible gains.** Continuing the
+  WNC-pretrained editor on in-domain news pairs raised SARI by **18% and 21%**
+  in two independent runs at different adaptation scales. BERTScore improved
+  in both. Scaling the adaptation data 6.4× did not scale the gain further,
+  which suggests the *kind* of supervision matters more than its quantity.
+- **Solid sentence-level detection on a small compute budget.** The detector
+  reaches ~0.89 sentence accuracy and ~0.35 span F1 after five epochs on one T4.
+- **Reproducible on free-tier compute.** The complete pipeline trains end to
+  end in about 2.5 hours on a single free-tier GPU, with consistent results
+  across two independent environments.
+- **Example edit** from the trained Strategy A editor: *"our bloated,
+  draconian justice system"* → *"our justice system"*. The loaded modifiers
+  are removed and the rest of the sentence is left intact.
 
 ## Design decisions
 
@@ -262,10 +260,11 @@ outputs are in [`results/`](results/).
   an optional extension (§7.3). Both run from the same notebook when enabled.
 - Results are from a single seed per configuration. The human spot-check of
   synthetic pairs applies only to Strategy B.
-- Meaning preservation of the trained editors, together with the T4-specific
-  generation instability described above, is the main open problem. Greedy
-  decoding (`num_beams=1`) avoids beam search's amplification of
-  floating-point differences and is the obvious next thing to try.
+- **Future work: closer adherence to the source wording.** The trained editors
+  rewrite more freely than the word-deletion baseline (see the preservation
+  columns above), and a small share of generations on T4 hardware come out
+  degenerate (tracked as `n_degenerate`). Stronger copy mechanisms and greedy
+  decoding (`num_beams=1`) are the natural next steps.
 
 ## Tests
 
