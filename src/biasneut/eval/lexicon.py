@@ -1,6 +1,6 @@
 """Linguistic lexicon features (Recasens et al. 2013's word lists, as
-released with Pryzant et al. 2020) — one of the few directly reusable
-assets from the existing codebase (``neutralizing-bias-master/src/lexicons``).
+released with Pryzant et al. 2020, MIT-licensed) — shipped in this repo
+under ``data/lexicons/``.
 Used as one signal inside the Aggregate Bias Score (§6.1), independent of any
 trained classifier.
 """

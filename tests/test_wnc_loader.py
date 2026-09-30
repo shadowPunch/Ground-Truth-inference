@@ -4,10 +4,10 @@ import pytest
 
 from biasneut.data.wnc import load_wnc
 
-WNC_DEV_PATH = Path(__file__).parent.parent.parent / "bias_data" / "bias_data" / "WNC" / "biased.word.dev"
+WNC_DEV_PATH = Path(__file__).parent.parent / "data" / "bias_data" / "WNC" / "biased.word.dev"
 
 
-@pytest.mark.skipif(not WNC_DEV_PATH.exists(), reason="local WNC release not vendored in this checkout")
+@pytest.mark.skipif(not WNC_DEV_PATH.exists(), reason="WNC not downloaded (see README: Data)")
 def test_load_wnc_real_file_smoke():
     examples = load_wnc(WNC_DEV_PATH, max_examples=20)
     assert len(examples) == 20

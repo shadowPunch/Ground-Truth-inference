@@ -3,8 +3,8 @@
 premise of this project is that WNC's Wikipedia register does not transfer
 cleanly to news, per §2.1/§4.2).
 
-File format (confirmed from the locally-vendored ``bias_data/bias_data/WNC``
-release): 7-column TSV, no header —
+File format (the official release, https://nlp.stanford.edu/projects/bias/bias_data.zip):
+7-column TSV, no header —
 ``id, src_tok, tgt_tok, src_raw, tgt_raw, src_pos_tags, tgt_dep_tags``.
 We use only the raw (untokenized) columns; the BERT-wordpiece columns are
 Pryzant-specific artifacts we don't need with a modern tokenizer.

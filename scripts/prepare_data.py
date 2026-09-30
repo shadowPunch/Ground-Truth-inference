@@ -27,8 +27,8 @@ def _dump(examples, path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-dir", default="data_cache")
-    parser.add_argument("--wnc-dir", default="../bias_data/bias_data/WNC",
-                         help="Path to the locally-vendored WNC release")
+    parser.add_argument("--wnc-dir", default="data/bias_data/WNC",
+                         help="Path to the unzipped WNC release (see README: Data)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sources", nargs="+", default=["babe", "basil", "wnc"],
                          choices=["babe", "basil", "wnc"])

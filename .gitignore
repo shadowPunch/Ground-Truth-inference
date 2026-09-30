@@ -6,7 +6,10 @@ __pycache__/
 
 # Large/derived artifacts — reproducible via scripts/, not checked in.
 data_cache/
+data/bias_data
 runs/
+wandb/
 *.ckpt
 *.bin
 *.safetensors
+*.zip

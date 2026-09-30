@@ -1,0 +1,57 @@
+{
+  "copy_input": {
+    "name": "copy_input",
+    "frac_neutral": 0.6025641025641025,
+    "mean_prob_drop": 0.0,
+    "mean_bertscore_f1": 0.9999999774572177,
+    "mean_sbert_cosine": 1.000000039354349,
+    "sari": 100.0,
+    "bleu": 100.00000000000004,
+    "mean_perplexity": 65.09353512984056,
+    "mean_grammatical_prob": 0.9063467513053463
+  },
+  "delete_flagged_word": {
+    "name": "delete_flagged_word",
+    "frac_neutral": 0.6666666666666666,
+    "mean_prob_drop": 0.031825595776760265,
+    "mean_bertscore_f1": 0.9933854540189108,
+    "mean_sbert_cosine": 0.9899789952696898,
+    "sari": 85.80116734393015,
+    "bleu": 97.38734375389782,
+    "mean_perplexity": 67.58864780267079,
+    "mean_grammatical_prob": 0.8599785922859342
+  },
+  "strategy_a": {
+    "name": "strategy_a",
+    "frac_neutral": 0.9230769230769231,
+    "mean_prob_drop": 0.19757174366118246,
+    "mean_bertscore_f1": 0.8047169154653182,
+    "mean_sbert_cosine": 0.217530658438754,
+    "sari": 7.4248346594506325,
+    "bleu": 0.3603045028354414,
+    "mean_perplexity": Infinity,
+    "mean_grammatical_prob": 0.3001769281899891
+  },
+  "strategy_a_adapted": {
+    "name": "strategy_a_adapted",
+    "frac_neutral": 0.907051282051282,
+    "mean_prob_drop": 0.18949844583050732,
+    "mean_bertscore_f1": 0.8133071957108302,
+    "mean_sbert_cosine": 0.2514519251939745,
+    "sari": 8.972176845469093,
+    "bleu": 0.4049847754745317,
+    "mean_perplexity": Infinity,
+    "mean_grammatical_prob": 0.23844374964634577
+  },
+  "strategy_c_lewis": {
+    "name": "strategy_c_lewis",
+    "frac_neutral": 0.9743589743589743,
+    "mean_prob_drop": 0.21419208135771342,
+    "mean_bertscore_f1": 0.812020986699141,
+    "mean_sbert_cosine": 0.18605115806433156,
+    "sari": 12.122761422811408,
+    "bleu": 0.019204102643054007,
+    "mean_perplexity": Infinity,
+    "mean_grammatical_prob": 0.3901217846940152
+  }
+}

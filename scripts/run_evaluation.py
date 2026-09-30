@@ -33,7 +33,7 @@ def main() -> None:
     parser.add_argument("--independent-detector-dir", default="runs/detector_eval_independent")
     parser.add_argument("--pipeline-detector-dir", default="runs/detector")
     parser.add_argument("--editor-dir", default="runs/editor")
-    parser.add_argument("--lexicon-dir", default="../neutralizing-bias-master/src/lexicons")
+    parser.add_argument("--lexicon-dir", default="data/lexicons")
     parser.add_argument("--set", nargs="*", default=[])
     args = parser.parse_args()
 

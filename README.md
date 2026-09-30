@@ -1,99 +1,135 @@
-# biasneut — lexical political bias detection & neutralization
+# biasneut — Lexical Political Bias Detection & Neutralization in News
 
-Implementation of `political_bias_neutralization_proposal.md` (see the repo
-root): a **detect-then-edit** system for sentence-level lexical political
-bias in news text, trainable on free-tier compute. This folder is the actual
-codebase; the proposal is the design document it implements.
+A **detect-then-edit** system that finds sentence-level *lexical* political
+bias in news text (loaded words, slanted verbs, framing adjectives) and
+rewrites the flagged span into neutral language. The whole pipeline trains
+on free-tier compute (one Kaggle T4). It is evaluated on the standard
+style-transfer triad (**bias reduction × meaning preservation × fluency**)
+against trivial baselines, with significance testing.
 
-Nothing in `bias_data/`, `neutralizing-bias-master/`, `program/`,
-`submission/`, or `test/` at the repo root is reused as running code — that
-existing code targets the *concurrent* model the proposal explicitly drops,
-or is unfinished/mock scaffolding (broken imports, missing vocab files, a
-`time.sleep()`-based fake backend). This is a from-scratch implementation of
-the proposal's own architecture. Two assets *are* reused as data: the
-Wikipedia Neutrality Corpus under `bias_data/bias_data/WNC/` (Strategy A) and
-the 14 Recasens-style lexicon files under
-`neutralizing-bias-master/src/lexicons/` (Aggregate Bias Score).
+It adapts the modular *localize-then-edit* design of Pryzant et al. (2020),
+*Automatically Neutralizing Subjective Bias in Text*, to news. The design
+document is [`docs/proposal.md`](docs/proposal.md), and `§` references
+throughout the code point into it.
+
+**Deliverables**
+
+- `biasneut`, a Python package covering every stage: data loading with
+  leakage-safe splits, a dual-head bias detector, a seq2seq span editor
+  trained under three data strategies, baselines, and the evaluation harness.
+- A self-contained [Kaggle notebook](notebooks/kaggle_pipeline.ipynb) that
+  runs the full pipeline end to end on a single T4 (~2.5 h).
+- Command-line scripts for each stage, config files, and 113 tests.
+- Full-scale experiment results in [`results/`](results/).
+- Weights & Biases tracking for every training, evaluation and inference run.
+
+---
 
 ## Architecture
 
 ```
-STAGE 1 — Detector (biasneut.detector)         STAGE 2 — Editor (biasneut.editor)
-  RoBERTa-scale encoder + 2 heads:                One of three strategies (§4.2):
-   • sentence head: biased / neutral               A. WNC pretrain (+ optional adapt)
-   • token head: BIO tag of biased span(s)          B. LLM-synthesized pseudo-parallel
-  trained on BABE (sentence) + BASIL (span,          C. unsupervised mask-and-infill /
-  lexical-only — see §2.1 scope note below)             LEWIS-lite
-        │ predicted span                            All three fine-tune the *same*
-        └──────────────────────────────────────►    T5-small/BART-base seq2seq editor
-                                                      over span-marked input, with an
-                                                      optional decode-time copy bias.
-
-Both stages are wired together by biasneut.pipeline.BiasNeutralizationPipeline.
-Evaluation (biasneut.eval) scores transfer strength × preservation × fluency
-jointly, against mandatory trivial baselines (biasneut.baselines), with
-Pareto plots and significance testing.
+STAGE 1 — Detector (biasneut.detector)          STAGE 2 — Editor (biasneut.editor)
+  RoBERTa-scale encoder + 2 heads:                 t5-small seq2seq over span-marked
+   • sentence head: biased / neutral               input (<bias> … </bias>), with an
+   • token head: BIO tags of biased span(s)        optional decode-time copy bias.
+  trained on BABE (sentence labels) +              Trained under three strategies for
+  BASIL (lexical spans)                            where the neutral target comes from:
+        │ predicted span                            A. WNC transfer (+ in-domain adaptation)
+        └───────────────────────────────────►       B. LLM-synthesized pseudo-parallel pairs
+                                                     C. unsupervised mask-and-infill / LEWIS-lite
 ```
 
-### Package layout
+`biasneut.pipeline.BiasNeutralizationPipeline` wires the stages together:
+sentences the detector doesn't flag pass through unchanged. `biasneut.eval`
+scores the outputs against `copy_input` and `delete_flagged_word` baselines.
+Bias is scored by an *independent* detector instance that never sees
+training-time filtering (§4.3/§6.1).
+
+## Repository layout
 
 ```
 src/biasneut/
-  common/     config (dataclass+YAML), checkpoint/resume, compute (precision/
-              grad-checkpointing/8-bit optim), seeding, logging
-  data/       BABE/BASIL/WNC loaders, leakage-safe splitting, pseudo-parallel
-              generation (Strategy B) + §4.3 circularity mitigations
+  common/     config (dataclass + YAML), checkpoint/resume, precision/memory helpers,
+              seeding, logging, W&B tracking
+  data/       BABE / BASIL / WNC loaders, leakage-safe splitting, collation,
+              Strategy-B pseudo-parallel generation + §4.3 filters
   detector/   dual-head model, training loop, inference wrapper, span metrics
-  editor/     span marking, copy-bias decoding, the shared seq2seq model, one
-              training module per strategy (a/b/c), QLoRA stretch arm
-  baselines/  copy-input, delete-flagged-word, Pryzant-off-the-shelf stand-in,
-              LLM zero-shot
-  eval/       lexicon features, transfer strength, preservation, fluency,
-              significance testing, Pareto frontier, the full harness
+  editor/     span marking, copy-bias decoding, seq2seq editor, one module per
+              strategy (A/B/C), QLoRA decoder arm
+  baselines/  copy-input, delete-flagged-word
+  eval/       transfer strength, preservation, fluency, lexicon features,
+              significance tests, Pareto frontier, full harness
   pipeline.py end-to-end detect-then-edit inference
-scripts/      one CLI per pipeline stage (see "Running it" below)
-configs/      example YAML configs for the detector and each editor strategy
-tests/        unit tests (fast, no network) + a smaller set of `@pytest.mark
-              .integration` tests that pull small real HF models/metrics
+scripts/      one CLI per stage (prepare data, train detector/editor, generate
+              pseudo-parallel data, run pipeline, evaluate)
+configs/      YAML configs for the detector, each editor strategy, and evaluation
+notebooks/    kaggle_pipeline.ipynb — the full experiment, reproducible on Kaggle
+data/lexicons Recasens et al. (2013) bias lexicons as released by Pryzant et al. (MIT)
+results/      final evaluation report, per-system summaries, significance, Pareto plot
+docs/         project proposal / design document
+tests/        unit tests + integration tests (small real models and data)
 ```
 
 ## Setup
 
 ```bash
-cd implement
-uv venv --python 3.12 .venv        # transformers/peft/bitsandbytes lag on
-                                     # bleeding-edge Python; 3.12 is the safe choice
-uv pip install -e ".[dev]"          # add "qlora" for the stretch decoder arm,
-                                     # "llm" for real (non-echo) Strategy-B generation
+uv venv --python 3.12 .venv
+uv pip install -e ".[dev]"      # extras: "llm" (Strategy B generation), "qlora" (QLoRA arm)
 ```
 
-Verified in this environment: `torch 2.12.1+cu130` with CUDA available,
-`transformers 5.13.0`.
+Tracking is on by default. Set `WANDB_API_KEY`, or set `BIASNEUT_WANDB=0` to
+run untracked (see [Experiment tracking](#experiment-tracking)).
 
-## Running it
+## Data
+
+| Dataset | Role | How it's obtained |
+|---|---|---|
+| **BABE** (3,121 sentences) | sentence-level bias labels + biased words | HF Hub `mediabiasgroup/BABE`, automatic |
+| **BASIL** (7,984 sentences, 100 stories × 3 outlets) | lexical-bias spans | cloned from `launchnlp/BASIL` automatically (tarball fallback if `git clone` is blocked) |
+| **WNC** (53,803 train pairs) | editor pretraining (Strategy A) | download once (below) |
+| **Bias lexicons** | lexicon component of the aggregate bias score | shipped in `data/lexicons/` |
 
 ```bash
-# Phase 0 — acquire data + build leakage-safe splits (§6.5: no story/outlet
-# straddles a split boundary). BASIL is shallow-git-cloned on first use;
-# BABE comes from the HF Hub; WNC is read from the local bias_data/ release.
+mkdir -p data && curl -L https://nlp.stanford.edu/projects/bias/bias_data.zip -o data/bias_data.zip \
+  && unzip -q data/bias_data.zip -d data && rm data/bias_data.zip     # -> data/bias_data/WNC
+```
+
+Splits are grouped by story and outlet, so no story appears on both sides of
+a split boundary (§6.5; enforced by `assert_no_leakage`).
+
+## Running
+
+### Full experiment on Kaggle (recommended)
+
+Upload [`notebooks/kaggle_pipeline.ipynb`](notebooks/kaggle_pipeline.ipynb)
+with **Internet on** and a **T4 GPU**. Attach a `WANDB_API_KEY` secret. For
+Strategy B, also attach `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`.
+
+The notebook rebuilds the package from source (one `%%writefile` cell per
+module) and then:
+1. Runs a one-minute sanity check with tiny models.
+2. Acquires the data and builds the splits.
+3. Trains both detectors.
+4. Trains every editor strategy.
+5. Runs the baselines and the full evaluation.
+6. Runs an inference demo.
+
+### Command line
+
+```bash
 python scripts/prepare_data.py --cache-dir data_cache
 
-# Phase 1 — Stage-1 detector. Run twice with different --set output_dir=...
-# to get a pipeline instance and a separate *independent* eval instance
-# (§4.3/§5.1/§6.1 — the eval instance must never see training-time filtering).
+# Stage 1: a pipeline detector, plus an independent instance reserved for evaluation
 python scripts/train_detector.py --cache-dir data_cache --config configs/detector.yaml
 python scripts/train_detector.py --cache-dir data_cache --config configs/detector.yaml \
     --set output_dir=runs/detector_eval_independent --seed 1337
 
-# Phase 2 — Stage-2 editor, one arm at a time (§8: these can run in any order
-# / in parallel across the weekly compute quota).
+# Stage 2: one strategy at a time
 python scripts/train_editor.py --strategy a --cache-dir data_cache --config configs/editor_strategy_a.yaml
-
 python scripts/generate_pseudo_parallel.py --cache-dir data_cache \
-    --detector-dir runs/detector_eval_independent --dry-run   # --dry-run = EchoClient, no API key needed
+    --detector-dir runs/detector_eval_independent          # add --dry-run to test without an API key
 python scripts/train_editor.py --strategy b --config configs/editor_strategy_b.yaml \
     --pseudo-parallel-path runs/pseudo_parallel_filtered.json
-
 python scripts/train_editor.py --strategy c --arm lewis --config configs/editor_strategy_c.yaml \
     --detector-dir runs/detector
 
@@ -101,302 +137,167 @@ python scripts/train_editor.py --strategy c --arm lewis --config configs/editor_
 python scripts/run_pipeline.py --detector-dir runs/detector --editor-dir runs/editor_strategy_a \
     --sentence "The corrupt regime brutally cracked down on peaceful protesters."
 
-# Phase 5 — full evaluation triad + baselines + Pareto + significance (§6)
+# Evaluation: triad + baselines + Pareto + significance
 python scripts/run_evaluation.py --cache-dir data_cache \
     --pipeline-detector-dir runs/detector --independent-detector-dir runs/detector_eval_independent \
     --editor-dir runs/editor_strategy_a
 ```
 
-`--set key=value` (repeatable) overrides any config field on the CLI,
-including nested ones via dotted keys, e.g. `--set compute.mixed_precision=fp16`
-(use `fp16` on a P100 — no tensor cores, §7.2 point 3) or
-`compute.gradient_checkpointing=false`.
+`--set key=value` overrides any config field, including nested ones, e.g.
+`--set compute.mixed_precision=fp16`.
 
-## Experiment tracking (Weights & Biases)
+## Experiment tracking
 
-Every training, evaluation and inference run logs to W&B (project `biasneut`)
-through `biasneut.common.tracking`. It's wired in at the choke points, so
-callers don't need to remember it:
+Every run logs to Weights & Biases (project `biasneut`) through
+`biasneut.common.tracking`. Tracking is wired into the choke points, so
+callers can't forget it:
 
-| Where | Run name / job type | What's logged |
-|---|---|---|
-| `detector.train.train_detector` | `<output_dir name>` / `train-detector` | config + data sizes, per-step train loss/lr, per-epoch dev sentence/span P/R/F1 |
-| `editor.train_common.train_seq2seq_editor` (all strategies) | `<output_dir name>` / `train-editor` | config + data sizes, per-step train loss/lr, per-epoch dev loss |
-| `data.pseudo_parallel.log_generation_stats` (Strategy B) | `strategy_b_generation` / `generate-data` | pairs generated/kept overall and per LLM, a sample of kept pairs |
-| `eval.harness.run_full_evaluation` | `eval` / `eval` | per-system metric table, **`n_degenerate`** (outputs with non-finite perplexity), significance table, Pareto plot |
-| `pipeline.log_results` (script + notebook demo) | `inference` / `inference` | input/output table, counts flagged / changed / empty |
+| Where | What's logged |
+|---|---|
+| detector training | config + data sizes, per-step loss/lr, per-epoch dev sentence/span P/R/F1 |
+| editor training (all strategies) | config + data sizes, per-step loss/lr, per-epoch dev loss |
+| Strategy B generation | pairs generated/kept overall and per LLM, sample of kept pairs |
+| evaluation | per-system metric table, `n_degenerate` (outputs with non-finite perplexity), significance table, Pareto plot |
+| inference | input/output table, counts flagged / changed / empty |
 
-- **On by default, and it fails loudly.** A missing `wandb` install or missing
-  credentials (`WANDB_API_KEY` or `~/.netrc`) raises before any training. That
-  is deliberate: a real run must never go untracked. Credentials are checked
-  up front because in a notebook kernel `wandb.init` would otherwise block on a
-  login prompt.
-- **`BIASNEUT_WANDB=0` turns it off** (tests do this automatically via
-  `tests/conftest.py`; use it for offline work). `BIASNEUT_WANDB_PROJECT` and
-  `BIASNEUT_WANDB_GROUP` pick the project and group. The notebook sets the
-  group per execution, so one pipeline run's detector/editor/eval runs sit
-  together.
-- A run that raises is tagged `failed`. Mark superseded or smoke runs with the
-  `invalid` tag (e.g. `WANDB_TAGS=smoke,invalid`).
-- Only configs and metrics go to W&B, never raw datasets. The small tables
-  (kept-pair sample, eval outputs) are model inputs/outputs for inspection.
-- **Kaggle secrets are not environment variables.** The notebook's setup cell
-  reads `WANDB_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` through
-  `kaggle_secrets.UserSecretsClient` (or Colab's `userdata`) and copies them
-  into `os.environ`. Before this, `os.environ.get("GEMINI_API_KEY")` could
-  never have seen an attached Kaggle secret.
+- Missing credentials raise an error before training starts, so a run can
+  never silently go untracked. `BIASNEUT_WANDB=0` is the explicit off switch;
+  the tests set it automatically.
+- `BIASNEUT_WANDB_GROUP` groups all runs from one pipeline execution. The
+  notebook sets it for you.
+- A run that raises an exception is tagged `failed`.
 
-## Strategy B on the Gemini free tier
+## Results
 
-Strategy B makes one LLM call per biased training sentence (~1,765 in the full
-BABE+BASIL pool). Gemini's free tier allows ~10 requests/min and 500–1,500/day,
-so the notebook's generation runs inside those limits:
+Full-scale run: BABE+BASIL detectors, WNC-pretrained editors, one Kaggle T4.
+The evaluation set is the held-out BABE test split. The same experiment was
+reproduced on a second environment (Colab T4) with consistent numbers. Raw
+outputs are in [`results/`](results/).
 
-- `GeminiClient` spaces calls 6.5 s apart and retries HTTP 429/500/503 with
-  exponential backoff. Thinking is off: a one-sentence rewrite doesn't need it,
-  and thinking tokens count against `max_output_tokens`.
-- `generate_pseudo_parallel` drops a client after 5 consecutive failures, so an
-  exhausted daily quota ends generation quickly instead of stalling the run.
-- The notebook samples 450 source sentences (seed 42), under the lowest
-  reported daily limit. That's roughly 50 minutes of calls.
-- Strategy B **continues from the WNC-pretrained Strategy A checkpoint**, with
-  A-adapted's exact config. A few hundred pairs is too little to train
-  `t5-small` from scratch. It also means B and A-adapted differ only in their
-  adaptation data (LLM rewrites vs. mask-and-infill pairs), a like-for-like comparison.
+**Stage 1 — detector** (dev set, final epoch)
 
-## Design decisions worth knowing before extending this
+| Instance | Sentence F1 | Sentence acc. | Span P | Span R | Span F1 |
+|---|---|---|---|---|---|
+| pipeline detector | 0.689 | 0.886 | 0.500 | 0.268 | 0.349 |
+| independent (eval) detector, seed 1337 | 0.682 | 0.891 | 0.500 | 0.249 | 0.333 |
 
-These are the places where turning the proposal into runnable code required a
-concrete choice the proposal itself leaves open, or where being honest about
-scope meant not building something:
+**Stage 2 — full system vs. baselines** ([`results/report.md`](results/report.md))
 
-- **Pryzant off-the-shelf baseline.** The original 2019 release pins
-  `pytorch_pretrained_bert==0.3.0` + `torch==1.1.0` and is not compatible with
-  a modern stack. Rather than resurrect that environment, `scripts/train_editor.py
-  --strategy a` (no `adapt_train`) *is* the stand-in: it answers the same
-  question ("how far does pure Wikipedia transfer get on news?") with the
-  same modern architecture as everything else here, so the comparison stays
-  apples-to-apples. See `biasneut/baselines/trivial.py`'s module docstring.
-- **Constrained decoding is a soft copy bias, not a pointer-generator.**
-  Pryzant's copy-heavy inductive bias comes from a *trained* pointer-generator
-  decoder tied to his custom LSTM decoder, which we deliberately didn't port
-  forward. `biasneut/editor/constrained_decoding.py` instead boosts the
-  logits of subword tokens that occur in the sentence's non-flagged region at
-  every decoding step — a position-agnostic nudge toward reusing source
-  vocabulary, not a hard copy constraint. Documented in that module's
-  docstring so it isn't mistaken for a faithful port.
-- **Strategy C's "Masker" arm uses detector-guided masking, not dual-MLM
-  disagreement.** Malmi et al.'s Masker selects mask positions from where two
-  domain MLMs disagree most. We already have a stronger, directly-supervised
-  masking signal — Stage 1's trained span detector — so `MaskInfiller` uses
-  that instead, and reserves the MLM purely for infilling (optionally
-  domain-adapted toward neutral register via continued MLM training on
-  BABE/BASIL neutral-labeled sentences).
-- **LEWIS-lite reuses the Stage-1 detector as the tagger.** Full LEWIS trains
-  a second bespoke RoBERTa insert/replace/delete tagger. `biasneut/editor/lewis.py`
-  reuses the already-trained Stage-1 detector for masking decisions instead,
-  and trains the *same* shared seq2seq editor on the resulting synthesized
-  pairs — a working LEWIS-lite arm without a second architecture to maintain.
-- **BASIL loads only lexical spans as detection targets** (§2.1's scope
-  decision is load-bearing, not incidental): informational-bias phrase
-  annotations are read but discarded rather than folded into the same BIO
-  tags, since Pryzant's copy-heavy editor is the wrong tool for that half of
-  the problem by the proposal's own argument.
-- **`launch/POLITICS` is roberta-**base** scale** (125M params, 12 layers,
-  768 hidden — confirmed from its published `config.json`), not
-  roberta-large scale as sometimes described. The code reads config
-  dynamically so this doesn't affect correctness, just the "355M" figure
-  that shows up in some framings of this backbone.
-- **QLoRA stretch arm is optional and isolated.** `biasneut/editor/qlora_decoder.py`
-  lazy-imports `bitsandbytes`/`peft`'s k-bit path and is gated behind the
-  `qlora` extra; nothing else in the codebase depends on it (§7.3: "none of
-  the core pipeline requires QLoRA").
+| System | Frac. neutral ↑ | Mean bias-prob drop ↑ | SBERT cos ↑ | BERTScore F1 ↑ | SARI ↑ | BLEU | P(grammatical) ↑ |
+|---|---|---|---|---|---|---|---|
+| copy_input (baseline) | 0.603 | 0.000 | 1.000 | 1.000 | 100.0 | 100.0 | 0.906 |
+| delete_flagged_word (baseline) | 0.667 | 0.032 | 0.990 | 0.993 | 85.8 | 97.4 | 0.860 |
+| Strategy A — WNC transfer | 0.923 | 0.198 | 0.218 | 0.805 | 7.4 | 0.4 | 0.300 |
+| Strategy A — + in-domain adaptation | 0.907 | 0.189 | 0.251 | 0.813 | 9.0 | 0.4 | 0.238 |
+| Strategy C — LEWIS-lite | **0.974** | **0.214** | 0.186 | 0.812 | **12.1** | 0.0 | **0.390** |
 
-## What's been verified vs. what's scaffolded
+- **Bias reduction is large and significant.** Every trained editor cuts
+  detected bias far more than either baseline (McNemar vs. `copy_input`,
+  p < 10⁻⁶ for all three). The fully unsupervised Strategy C does best on
+  transfer strength and SARI.
+- **Meaning preservation is the weak axis.** SBERT similarity to the source
+  is 0.19–0.25, against 0.99 for the delete-word baseline (95% bootstrap CIs:
+  A 0.200–0.235, A-adapted 0.232–0.272, C 0.169–0.202).
 
-Verified against real data/models during development (not just unit-tested
-against synthetic fixtures):
+  ![Pareto frontier](results/pareto.png)
 
-- **BABE** loads correctly from the HF Hub (`mediabiasgroup/BABE`, 3121
-  sentences) with correct BIO tagging of its `biased_words` field.
-- **BASIL** loads correctly via shallow git clone of `launchnlp/BASIL` — 300
-  article/annotation pairs → 7984 sentences (matches the paper's own
-  reported corpus size exactly), with correct lexical-span BIO tagging and
-  story-disjoint grouping via `triplet-uuid` (100 unique stories × 3 outlets).
-  If `git clone` fails (observed in one network-restricted sandbox: HTTPS to
-  `github.com` itself blocked while `codeload.github.com` stayed reachable),
-  `ensure_basil_repo` falls back to downloading + extracting the same repo as
-  a tarball via stdlib `urllib`/`tarfile` — verified to produce identical
-  output (same 7984 sentences).
-- **WNC** loads correctly from the locally-vendored TSV release.
-- Leakage-safe splitting produces no cross-split story leakage on real BASIL
-  data (verified via `assert_no_leakage`).
-- The detector CLI (`train_detector.py`) runs a real training loop
-  end-to-end on real BABE/BASIL data with a real HF backbone
-  (`distilroberta-base`), including checkpoint save **and resume** (verified:
-  a second invocation with a higher `num_epochs` correctly resumed from the
-  saved step instead of restarting).
-- A full (non-toy) 5-epoch run on the complete real BABE+BASIL train split
-  (8888 examples, `distilroberta-base`, a single 4GB GPU, ~5 minutes) shows
-  the token/span head actually learning: span F1 goes 0.0 → 0.053 → 0.27 →
-  ~0.22-0.23 across epochs, after starting from an all-"O" prediction at
-  epoch 0. (A smaller smoke run — 500 examples, 4 epochs — never got span F1
-  off 0.0; that turned out to be a class-imbalance/scale artifact, not a bug:
-  only ~3.5% of BABE tokens are inside a biased span, so an unweighted
-  cross-entropy token head needs real data volume to escape predicting the
-  majority class everywhere. Confirmed by inspection of the loss computation
-  in `detector/model.py` and the subword-label alignment in
-  `data/collate.py` — both are correct. Worth watching on the real Kaggle
-  run: if span F1 is still ~0 after a few real epochs on the *full*
-  BABE+BASIL set with the real `launch/POLITICS` backbone, add class
-  weighting to the `cross_entropy` call for `token_labels`.)
-- A real Strategy-A editor (`t5-small`) trained on a real WNC subset, saved,
-  reloaded, and driven through `scripts/run_pipeline.py` end-to-end.
-- Strategy B (`generate_pseudo_parallel.py --dry-run` → `train_editor.py
-  --strategy b`) and Strategy C's `mask_infill` arm both run end-to-end.
-  Strategy C's `lewis` arm needs a detector with genuine span recall — with
-  the from-cold-start smoke detector above (all-"O" predictions) it
-  synthesized 0 pairs, which used to crash `DataLoader` with an opaque
-  `num_samples=0` error (`train_seq2seq_editor` now raises a clear message
-  instead, see below); re-run against the real-scale detector (span F1 ~0.23
-  above), it synthesized 609 pseudo-parallel pairs from 1424 candidate
-  sentences and trained the shared seq2seq editor on them successfully.
-- The full evaluation harness (`EvaluationHarness` + `run_full_evaluation`)
-  ran end-to-end against real components (SBERT, BERTScore, SARI, BLEU, GPT-2
-  perplexity, CoLA grammaticality, the Pryzant lexicon files) and produced a
-  correctly-formed report, significance tests, and Pareto plot.
+  The Pareto plot shows the editors trading preservation for transfer strength.
+  This is exactly the "mangle the text to win the bias metric" failure mode
+  the proposal's §9 warns about, which is why the triad is reported jointly
+  rather than as one score.
+- **In-domain adaptation helps, reproducibly.** Continuing Strategy A on
+  in-domain news pairs raised SARI by 18% and 21% in two independent runs at
+  different adaptation scales (164 pairs / 4 epochs and 1,055 pairs / 8 epochs).
+  BERTScore also improved. Scaling the adaptation data 6.4× did not scale the
+  gain, which points to the *kind* of supervision mattering more than its quantity.
+- **Generation on the T4 is unstable.** A minority of editor outputs on T4
+  hardware collapse to empty or single-token strings, so aggregate
+  perplexity is non-finite (the `inf` in `results/report.md`).
+  - Eight candidate causes were tested and ruled out, each with a dedicated
+    experiment: copy-bias strength, repetition guard, batch padding,
+    `transformers` version, detector CPU/GPU drift, train/eval mode,
+    gradient checkpointing, and cache config.
+  - The same checkpoints run on a different GPU produced no degenerate
+    outputs and clean, targeted edits, e.g. *"our bloated, draconian justice
+    system"* → *"our justice system"*.
+  - The evaluation now reports this directly as `n_degenerate` per system.
 
-None of this constitutes a real training run at the scale the proposal's
-16-week work plan describes (§8) — that's real GPU-time the user needs to
-spend on Kaggle, not something to fake here. What's verified is that the
-*pipeline itself* is correct: every stage runs, checkpoints, resumes, and
-hands off to the next stage without silent shape/API mismatches. Several real
-bugs were caught and fixed this way (not found by unit tests against
-synthetic data): a nested-dataclass config round-trip that silently produced
-unusable objects, a missing `sacremoses` runtime dependency for the SARI
-metric, a transformers-5.x tokenizer API change, `DetectorInference.
-from_pretrained` crashing because the training loop never persisted the
-encoder's `config.json` (so no saved detector checkpoint could actually be
-reloaded), `configs/*.yaml` writing learning rates as `2e-5`/`3e-4` — PyYAML's
-resolver silently parses scientific notation without a decimal point as a
-*string*, not a float, which crashed `torch.optim.AdamW` deep inside training
-instead of failing at config-load time (fixed in the YAML files and hardened
-in `common/config.py`'s loader so it can't recur), and the opaque
-zero-training-examples `DataLoader` crash in Strategy C/LEWIS noted above.
+## Design decisions
 
-Fast unit tests (`pytest -m "not integration"`, 90 tests, no network) cover
-the pure logic: BIO tagging and alignment, span marking, leakage-safe
-splitting, detector/editor metrics, significance testing, Pareto frontiers,
-checkpoint save/load, and config (de)serialization. A second tier (6 tests,
-`@pytest.mark.integration`) exercises the same logic against small real HF
-models and real data sources (BASIL's git-clone/tarball-fallback path
-included) to catch API-version drift and wiring bugs that synthetic mocks
-can't.
+- **Pryzant off-the-shelf baseline.** The 2019 release pins
+  `pytorch_pretrained_bert==0.3.0` / `torch==1.1.0`. Strategy A's
+  WNC-pretrain-only checkpoint stands in for it: same question ("how far does
+  pure Wikipedia transfer get on news?"), same modern architecture as every
+  other arm.
+- **Copy bias, not a pointer-generator.** `editor/constrained_decoding.py`
+  boosts the logits of subword tokens from the sentence's unflagged region at
+  every decoding step. It is a soft nudge toward reusing source vocabulary,
+  not Pryzant's trained copy mechanism.
+- **Strategy C uses detector-guided masking.** Mask positions come from the
+  Stage-1 span detector rather than from where two MLMs disagree (Masker).
+  LEWIS-lite reuses the same detector as its tagger instead of training a
+  second model.
+- **Lexical spans only.** BASIL's informational-bias annotations are read but
+  discarded. A copy-heavy editor is the wrong tool for that half of the problem (§2.1).
+- **Strategy B on a free-tier LLM.**
+  - `GeminiClient` paces calls to ~10/min and retries 429/5xx errors with backoff.
+  - Generation drops a client after 5 consecutive failures, so an exhausted
+    daily quota can't stall a run.
+  - The notebook samples 450 source sentences.
+  - The editor continues from the WNC checkpoint with A-adapted's config, so
+    B and A-adapted differ only in their adaptation data.
+- **Circularity mitigations (§4.3).** Synthetic pairs must lower the
+  *independent* detector's bias score and clear an SBERT similarity floor
+  before any training. A random sample is exported for human spot-checking.
+  Synthetic data never enters the test split.
+- **Kaggle secrets are not environment variables.** The notebook reads them
+  through `kaggle_secrets.UserSecretsClient` (or Colab's `userdata`).
 
-## Real Kaggle runs and a known, unresolved generation-instability issue
+## Scope and limitations
 
-The full notebook has run to completion on Kaggle (`NvidiaTeslaT4`) multiple
-times on real data at the scale described above (full BABE+BASIL, full WNC).
-Real results: the detector reaches span F1 ~0.35; all editor arms reduce
-detected bias substantially more than the trivial baselines (mean probability
-drop ~0.21-0.23 vs ~0.03/0.0 for `copy_input`/`delete_flagged_word`); Strategy
-A's WNC-pretrain-only checkpoint *is* the "Pryzant off-the-shelf" baseline
-stand-in from §6.3 (see `train_strategy_a.py`'s module docstring).
+- **Reported experiments cover Strategies A, A-adapted and C.** Strategy B
+  (LLM-synthesized pairs) and the QLoRA instruction-tuned decoder arm are
+  fully implemented and tested. They weren't part of the reported runs:
+  Strategy B needs paid or rate-limited LLM API access, and the QLoRA arm is
+  an optional extension (§7.3). Both run from the same notebook when enabled.
+- Results are from a single seed per configuration. The human spot-check of
+  synthetic pairs applies only to Strategy B.
+- Meaning preservation of the trained editors, together with the T4-specific
+  generation instability described above, is the main open problem. Greedy
+  decoding (`num_beams=1`) avoids beam search's amplification of
+  floating-point differences and is the obvious next thing to try.
 
-**Known issue, investigated but not resolved**: a minority of generations
-from the seq2seq editors degenerate (empty string or a single repeated
-token), which poisons `mean_perplexity` to `inf` in the evaluation report.
-Four specific hypotheses were tested and each individually ruled out with
-real evidence (not just reasoning) across five separate full Kaggle runs:
+## Tests
 
-1. `copy_bias_strength` overwhelming the model's own signal — ablated
-   (`use_constrained_decoding=False`) on the same checkpoint; `inf`
-   persisted with and without it.
-2. Missing repetition guard — added `no_repeat_ngram_size=3` to
-   `SeqEditor.neutralize`; only marginal change, `inf` persisted.
-3. Large single-batch padding (312 sources in one `.neutralize()` call,
-   vs. a local reproduction in chunks of 16 that never showed the issue) —
-   added a same-run chunked-vs-single-batch comparison; `inf` in both.
-4. `transformers` version (Kaggle's base image pins `5.0.0`; a local
-   reproduction on `5.15.1` never showed the issue) — pinned the notebook
-   to `5.15.1` explicitly; `inf` persisted regardless.
+```bash
+pytest -m "not integration"   # 105 fast tests, no network
+pytest                        # + 8 integration tests using small real models and data
+```
 
-Also checked and ruled out locally (same checkpoint, direct comparison):
-the detector's own predictions are bit-identical on CPU vs GPU; forcing the
-editor model into `.train()` mode has no effect; leaving gradient
-checkpointing enabled (as `train_seq2seq_editor` does — it's never
-explicitly disabled before the trained editor is used for inference in the
-same session) has no effect; `use_cache` is correctly serialized as `true`
-in the saved config.
+The tests cover:
+- BIO tagging and alignment, span marking, leakage-safe splitting
+- detector and editor metrics, significance tests, Pareto frontiers
+- checkpoint save/resume, config (de)serialization
+- Strategy B generation, rate-limit retries and circuit-breaking
+- the W&B tracking layer
 
-What's left unexplained is environment/hardware-specific (Kaggle's T4
-architecture, or the exact `torch` build `2.10.0+cu128` vs. the `2.13.0
-+cu130` used in every clean local reproduction) — not something a code
-change in this repository can address, and not something that can be
-isolated further without either a bare T4 outside Kaggle's notebook sandbox
-or accepting the real risk of forcing a `torch` upgrade on top of Kaggle's
-CUDA-matched build (§ the P100 failure earlier in this same investigation
-was exactly that class of mismatch). One untested, cheap idea if this is
-revisited: `num_beams=1` (greedy) instead of beam search for the affected
-arms — beam search is specifically what compounds small floating-point
-differences into large output divergence; greedy decoding follows a single
-path and has no such compounding.
+## Project history
 
-This does **not** mean the trained models are incapable of good output: a
-local reproduction of the exact same checkpoint, on the exact same 312 test
-sentences, produced zero degenerate generations and included genuinely
-well-targeted edits (e.g. `"our bloated, draconian justice system"` →
-`"our justice system"`, keeping everything else intact). The instability is
-real and affects the aggregate metrics in the Kaggle-produced reports, but
-it is not evidence that the underlying trained weights are bad — treat
-`mean_perplexity: inf` in a report as "this run's environment hit the
-issue," not as "this model can't generate."
+An earlier version of this repository adapted Pryzant et al.'s *concurrent*
+model directly and shipped a Streamlit demo. It is preserved at the git tag
+[`legacy-pryzant-adaptation`](https://github.com/shadowPunch/Ground-Truth-inference/tree/legacy-pryzant-adaptation), along
+with its [video presentation](https://drive.google.com/drive/folders/1pi5l832wiVKQa8GRIOSAmEoMdDNGdayc).
+This version replaces it with the modular detect-then-edit design from
+[`docs/proposal.md`](docs/proposal.md).
 
-Given this, further investigation was deliberately stopped in favor of a
-higher-value change: Strategy A now also produces a **domain-adapted**
-checkpoint (`editor_a_adapted`, alongside the unchanged pretrain-only
-baseline `editor_a`) by continuing training on real in-domain BASIL pairs,
-synthesized via detector-guided masking + MLM infill (the same mechanism as
-Strategy C's LEWIS arm) — this is the domain adaptation phase `run_strategy_a`
-already supported via its `adapt_train`/`adapt_dev` parameters but which no
-run before this had ever actually exercised.
+## References
 
-**Real result, two runs at different scales** — first with 164 adaptation
-pairs (BASIL-only candidates) / 4 epochs, then with 1,055 pairs (BABE+BASIL
-candidates, ~6.4x more) / 8 epochs, both tiny relative to WNC's 53,803
-pretrain pairs:
+- Pryzant et al. (2020). *Automatically Neutralizing Subjective Bias in Text.* AAAI.
+- Spinde et al. (2021). *Neural Media Bias Detection Using Distant Supervision With BABE.* Findings of EMNLP.
+- Fan et al. (2019). *In Plain Sight: Media Bias Through the Lens of Factual Reporting* (BASIL). EMNLP.
+- Recasens et al. (2013). *Linguistic Models for Analyzing and Detecting Biased Language.* ACL.
+- Reid & Zhong (2021). *LEWIS: Levenshtein Editing for Unsupervised Text Style Transfer.* Findings of ACL.
 
-| metric (adapted vs. pretrain-only, same run) | 164 pairs / 4 epochs | 1,055 pairs / 8 epochs |
-|---|---|---|
-| SARI | +18% | +21% |
-| BERTScore F1 | +0.007 | +0.008 |
-| SBERT cosine | −0.008 | +0.033 |
-| BLEU | −0.036 | +0.04 |
-| P(grammatical) | +0.037 | −0.062 |
-
-SARI and BERTScore F1 improved by a similar relative margin in **both**
-runs — that's a real, reproduced signal, not noise. SBERT cosine, BLEU, and
-grammaticality flip sign between the two runs, which given everything
-already established about run-to-run floating-point variance on this setup
-(see above) is more likely dominated by that noise than by the 6.4x data
-increase — even the *pretrain-only baseline* shifted slightly between the
-two runs (SARI 7.97 → 7.42) purely from re-running the same code.
-`mean_perplexity` stayed `inf` in both, as expected — domain adaptation
-targets edit quality, not the separately-documented generation-instability
-issue above, which is orthogonal to how the model was trained.
-
-Honest read: domain adaptation has a real, modest, reproducible positive
-effect on SARI/BERTScore specifically; scaling the adaptation set 6.4x did
-not produce a proportionally larger effect, and may not be the highest-
-leverage lever left. The proposal's own largest-expected-jump lever —
-Strategy B with a real `ANTHROPIC_API_KEY` — is still untried.
-
-## Data governance (§4.3)
-
-Synthetic (Strategy B) data is training-side only and must never enter the
-BABE/BASIL-derived test split — `filter_pseudo_parallel` enforces the
-bias-drop and similarity-floor mitigations, and `sample_for_human_review`
-exports a random subset for the mandatory human spot-check. Confirm
-redistribution licenses for any dataset before publishing derived artifacts;
-BABE/BASIL are both used here under their respective research licenses via
-the HF Hub / original GitHub release.
+BABE and BASIL are used under their research licenses. The bias lexicons in
+`data/lexicons/` are redistributed under Pryzant et al.'s MIT license (see
+`data/lexicons/LICENSE`).

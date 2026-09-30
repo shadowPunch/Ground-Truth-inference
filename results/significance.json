@@ -1,0 +1,46 @@
+{
+  "delete_flagged_word": {
+    "system": "delete_flagged_word",
+    "baseline": "copy_input",
+    "mcnemar_transfer_p_value": 1.9073486328125e-06,
+    "mcnemar_statistic": 0.0,
+    "sbert_cosine_mean": 0.9899789952696898,
+    "sbert_cosine_ci": [
+      0.9865900359140375,
+      0.993257018011541
+    ]
+  },
+  "strategy_a": {
+    "system": "strategy_a",
+    "baseline": "copy_input",
+    "mcnemar_transfer_p_value": 0.0,
+    "mcnemar_statistic": 91.08035714285714,
+    "sbert_cosine_mean": 0.217530658438754,
+    "sbert_cosine_ci": [
+      0.2001599583561377,
+      0.23524672795506493
+    ]
+  },
+  "strategy_a_adapted": {
+    "system": "strategy_a_adapted",
+    "baseline": "copy_input",
+    "mcnemar_transfer_p_value": 0.0,
+    "mcnemar_statistic": 79.6036036036036,
+    "sbert_cosine_mean": 0.2514519251939745,
+    "sbert_cosine_ci": [
+      0.23213741804110424,
+      0.27179538861039476
+    ]
+  },
+  "strategy_c_lewis": {
+    "system": "strategy_c_lewis",
+    "baseline": "copy_input",
+    "mcnemar_transfer_p_value": 0.0,
+    "mcnemar_statistic": 77.80172413793103,
+    "sbert_cosine_mean": 0.18605115806433156,
+    "sbert_cosine_ci": [
+      0.16874052465353043,
+      0.20247797352755859
+    ]
+  }
+}

@@ -4,7 +4,7 @@ import pytest
 
 from biasneut.eval.lexicon import LexiconBiasScorer, load_lexicons
 
-LEXICON_DIR = Path(__file__).parent.parent.parent / "neutralizing-bias-master" / "src" / "lexicons"
+LEXICON_DIR = Path(__file__).parent.parent / "data" / "lexicons"
 
 
 @pytest.mark.skipif(not LEXICON_DIR.exists(), reason="Pryzant lexicon files not vendored in this checkout")

@@ -3,9 +3,9 @@ easy to beat trivially and surprisingly hard to beat for real, which is
 exactly why the proposal insists on reporting them.
 
 Note on "Pryzant off-the-shelf (WNC-trained)": the original 2019 release
-(``neutralizing-bias-master/``) is pinned to ``pytorch_pretrained_bert==0.3.0``
-and ``torch==1.1.0`` and is not load-bearing-compatible with a modern stack
-(see project survey). Rather than resurrect that environment, we substitute
+(github.com/rpryzant/neutralizing-bias) is pinned to ``pytorch_pretrained_bert==0.3.0``
+and ``torch==1.1.0`` and is not compatible with a modern stack. Rather than
+resurrect that environment, we substitute
 our own Strategy-A editor *after WNC pretraining but before any news
 adaptation* — i.e. ``train_strategy_a.run_strategy_a(..., adapt_train=None)``
 — which answers the exact same question the baseline is meant to answer
