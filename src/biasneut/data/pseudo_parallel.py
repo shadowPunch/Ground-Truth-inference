@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import logging
 import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -67,24 +68,58 @@ class AnthropicClient:
         return resp.content[0].text.strip()
 
 
+_RETRYABLE_HTTP_CODES = {429, 500, 503}
+
+
 @dataclass
 class GeminiClient:
-    """Thin wrapper so the generation loop doesn't depend on the SDK shape."""
+    """Thin wrapper so the generation loop doesn't depend on the SDK shape.
+
+    Paced for the free tier (~10 requests/min): calls are spaced
+    ``min_interval_s`` apart, and rate-limit/overload errors are retried with
+    exponential backoff before giving up.
+    """
 
     model: str = "gemini-2.5-flash"
     name: str = "gemini"
     max_tokens: int = 256
+    min_interval_s: float = 6.5
+    max_retries: int = 4
 
     def __post_init__(self):
         import os
 
         from google import genai
+        from google.genai import types
 
         self._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        # Thinking off: a one-sentence rewrite doesn't need it, and thinking
+        # tokens count against max_output_tokens (can leave the reply empty).
+        self._config = types.GenerateContentConfig(
+            max_output_tokens=self.max_tokens,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+        self._last_call = float("-inf")
 
     def generate(self, prompt: str) -> str:
-        resp = self._client.models.generate_content(model=self.model, contents=prompt)
-        return resp.text.strip()
+        for attempt in range(self.max_retries + 1):
+            wait = self._last_call + self.min_interval_s - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call = time.monotonic()
+            try:
+                resp = self._client.models.generate_content(model=self.model, contents=prompt, config=self._config)
+            except Exception as e:
+                if getattr(e, "code", None) not in _RETRYABLE_HTTP_CODES or attempt == self.max_retries:
+                    raise
+                backoff = self.min_interval_s * 2 ** attempt
+                logger.warning("Gemini HTTP %s, retrying in %.0fs (attempt %d)", e.code, backoff, attempt + 1)
+                time.sleep(backoff)
+                continue
+            if not resp.text:
+                raise ValueError("Gemini returned no text (likely blocked or truncated)")
+            return resp.text.strip()
+        raise AssertionError("unreachable")
 
 
 @dataclass
@@ -105,21 +140,34 @@ def generate_pseudo_parallel(
     examples: list[DetectionExample],
     clients: list[LLMClient],
     prompt_template: str = NEUTRALIZE_PROMPT_TEMPLATE,
+    max_consecutive_failures: int = 5,
 ) -> list[EditExample]:
     """One candidate per (example, client) — deliberately not deduplicated
     here so downstream filtering can compare candidates from different model
-    families against the same source sentence."""
+    families against the same source sentence.
+
+    A client that fails ``max_consecutive_failures`` times in a row (e.g. an
+    exhausted daily quota) is dropped for the rest of the run instead of
+    burning time on calls that can't succeed."""
     pairs: list[EditExample] = []
+    consecutive_failures = {client.name: 0 for client in clients}
     for ex in examples:
         if not ex.is_biased:
             continue
         prompt = prompt_template.format(sentence=ex.text)
         for client in clients:
+            if consecutive_failures[client.name] >= max_consecutive_failures:
+                continue
             try:
                 target = client.generate(prompt)
             except Exception:
                 logger.exception("Generation failed for client=%s on: %s", client.name, ex.text[:80])
+                consecutive_failures[client.name] += 1
+                if consecutive_failures[client.name] == max_consecutive_failures:
+                    logger.error("Dropping client=%s after %d consecutive failures",
+                                 client.name, max_consecutive_failures)
                 continue
+            consecutive_failures[client.name] = 0
             pairs.append(
                 EditExample(
                     source=ex.text,

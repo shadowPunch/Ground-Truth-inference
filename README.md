@@ -146,6 +146,24 @@ callers don't need to remember it:
   into `os.environ`. Before this, `os.environ.get("GEMINI_API_KEY")` could
   never have seen an attached Kaggle secret.
 
+## Strategy B on the Gemini free tier
+
+Strategy B makes one LLM call per biased training sentence (~1,765 in the full
+BABE+BASIL pool). Gemini's free tier allows ~10 requests/min and 500–1,500/day,
+so the notebook's generation runs inside those limits:
+
+- `GeminiClient` spaces calls 6.5 s apart and retries HTTP 429/500/503 with
+  exponential backoff. Thinking is off: a one-sentence rewrite doesn't need it,
+  and thinking tokens count against `max_output_tokens`.
+- `generate_pseudo_parallel` drops a client after 5 consecutive failures, so an
+  exhausted daily quota ends generation quickly instead of stalling the run.
+- The notebook samples 450 source sentences (seed 42), under the lowest
+  reported daily limit. That's roughly 50 minutes of calls.
+- Strategy B **continues from the WNC-pretrained Strategy A checkpoint**, with
+  A-adapted's exact config. A few hundred pairs is too little to train
+  `t5-small` from scratch. It also means B and A-adapted differ only in their
+  adaptation data (LLM rewrites vs. mask-and-infill pairs), a like-for-like comparison.
+
 ## Design decisions worth knowing before extending this
 
 These are the places where turning the proposal into runnable code required a
