@@ -1,4 +1,4 @@
-# biasneut — Lexical Political Bias Detection & Neutralization in News
+# Political Bias Detection & Neutralization in News
 
 A **detect-then-edit** system that finds sentence-level *lexical* political
 bias in news text (loaded words, slanted verbs, framing adjectives) and
