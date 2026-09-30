@@ -8,10 +8,11 @@ import json
 import sys
 from pathlib import Path
 
+from biasneut.common import tracking
 from biasneut.common.logging_utils import setup_logging
 from biasneut.detector.infer import DetectorInference
 from biasneut.editor.seq2seq_model import SeqEditor
-from biasneut.pipeline import BiasNeutralizationPipeline
+from biasneut.pipeline import BiasNeutralizationPipeline, log_results
 
 
 def main() -> None:
@@ -35,9 +36,13 @@ def main() -> None:
     editor = SeqEditor.load(args.editor_dir)
     pipeline = BiasNeutralizationPipeline(detector, editor)
 
-    results = pipeline(
-        sentences, num_beams=args.num_beams, use_constrained_decoding=not args.no_constrained_decoding,
-    )
+    config = {"detector_dir": args.detector_dir, "editor_dir": args.editor_dir, "num_beams": args.num_beams,
+              "constrained_decoding": not args.no_constrained_decoding}
+    with tracking.run(name="inference", job_type="inference", config=config) as tracker:
+        results = pipeline(
+            sentences, num_beams=args.num_beams, use_constrained_decoding=not args.no_constrained_decoding,
+        )
+        log_results(tracker, results)
     for r in results:
         json.dump(
             {"source": r.source, "neutralized": r.neutralized, "was_flagged_biased": r.was_flagged_biased,

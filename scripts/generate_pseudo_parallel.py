@@ -16,6 +16,7 @@ import json
 import logging
 from pathlib import Path
 
+from biasneut.common import tracking
 from biasneut.common.logging_utils import setup_logging
 from biasneut.data.cache_io import load_detection_examples
 from biasneut.data.pseudo_parallel import (
@@ -23,6 +24,7 @@ from biasneut.data.pseudo_parallel import (
     EchoClient,
     filter_pseudo_parallel,
     generate_pseudo_parallel,
+    log_generation_stats,
     sample_for_human_review,
 )
 from biasneut.detector.infer import DetectorInference
@@ -50,21 +52,26 @@ def main() -> None:
         examples = examples[: args.limit]
 
     clients = [EchoClient()] if args.dry_run else [AnthropicClient()]
-    logger.info("Generating with %d client(s) over %d biased sentences", len(clients), len(examples))
-    pairs = generate_pseudo_parallel(examples, clients)
+    config = {"clients": [c.name for c in clients], "similarity_floor": args.similarity_floor,
+              "dry_run": args.dry_run, "limit": args.limit, "detector_dir": args.detector_dir}
+    tags = ["dry-run", "invalid"] if args.dry_run else None
+    with tracking.run(name="strategy_b_generation", job_type="generate-data", config=config, tags=tags) as tracker:
+        logger.info("Generating with %d client(s) over %d biased sentences", len(clients), len(examples))
+        pairs = generate_pseudo_parallel(examples, clients)
 
-    detector = DetectorInference.from_pretrained(args.detector_dir)
-    preservation_scorer = PreservationScorer()
+        detector = DetectorInference.from_pretrained(args.detector_dir)
+        preservation_scorer = PreservationScorer()
 
-    filtered = filter_pseudo_parallel(
-        pairs,
-        bias_score_fn=detector.bias_score,
-        similarity_fn=lambda s, t: preservation_scorer._sbert.similarity(
-            preservation_scorer._sbert.encode(s), preservation_scorer._sbert.encode(t)
-        ).item(),
-        similarity_floor=args.similarity_floor,
-        require_bias_drop=not args.dry_run,  # EchoClient returns the input unchanged, so bias never "drops"
-    )
+        filtered = filter_pseudo_parallel(
+            pairs,
+            bias_score_fn=detector.bias_score,
+            similarity_fn=lambda s, t: preservation_scorer._sbert.similarity(
+                preservation_scorer._sbert.encode(s), preservation_scorer._sbert.encode(t)
+            ).item(),
+            similarity_floor=args.similarity_floor,
+            require_bias_drop=not args.dry_run,  # EchoClient returns the input unchanged, so bias never "drops"
+        )
+        log_generation_stats(tracker, len(examples), pairs, filtered)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

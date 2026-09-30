@@ -112,6 +112,40 @@ including nested ones via dotted keys, e.g. `--set compute.mixed_precision=fp16`
 (use `fp16` on a P100 — no tensor cores, §7.2 point 3) or
 `compute.gradient_checkpointing=false`.
 
+## Experiment tracking (Weights & Biases)
+
+Every training, evaluation and inference run logs to W&B (project `biasneut`)
+through `biasneut.common.tracking`. It's wired in at the choke points, so
+callers don't need to remember it:
+
+| Where | Run name / job type | What's logged |
+|---|---|---|
+| `detector.train.train_detector` | `<output_dir name>` / `train-detector` | config + data sizes, per-step train loss/lr, per-epoch dev sentence/span P/R/F1 |
+| `editor.train_common.train_seq2seq_editor` (all strategies) | `<output_dir name>` / `train-editor` | config + data sizes, per-step train loss/lr, per-epoch dev loss |
+| `data.pseudo_parallel.log_generation_stats` (Strategy B) | `strategy_b_generation` / `generate-data` | pairs generated/kept overall and per LLM, a sample of kept pairs |
+| `eval.harness.run_full_evaluation` | `eval` / `eval` | per-system metric table, **`n_degenerate`** (outputs with non-finite perplexity), significance table, Pareto plot |
+| `pipeline.log_results` (script + notebook demo) | `inference` / `inference` | input/output table, counts flagged / changed / empty |
+
+- **On by default, and it fails loudly.** A missing `wandb` install or missing
+  credentials (`WANDB_API_KEY` or `~/.netrc`) raises before any training. That
+  is deliberate: a real run must never go untracked. Credentials are checked
+  up front because in a notebook kernel `wandb.init` would otherwise block on a
+  login prompt.
+- **`BIASNEUT_WANDB=0` turns it off** (tests do this automatically via
+  `tests/conftest.py`; use it for offline work). `BIASNEUT_WANDB_PROJECT` and
+  `BIASNEUT_WANDB_GROUP` pick the project and group. The notebook sets the
+  group per execution, so one pipeline run's detector/editor/eval runs sit
+  together.
+- A run that raises is tagged `failed`. Mark superseded or smoke runs with the
+  `invalid` tag (e.g. `WANDB_TAGS=smoke,invalid`).
+- Only configs and metrics go to W&B, never raw datasets. The small tables
+  (kept-pair sample, eval outputs) are model inputs/outputs for inspection.
+- **Kaggle secrets are not environment variables.** The notebook's setup cell
+  reads `WANDB_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` through
+  `kaggle_secrets.UserSecretsClient` (or Colab's `userdata`) and copies them
+  into `os.environ`. Before this, `os.environ.get("GEMINI_API_KEY")` could
+  never have seen an attached Kaggle secret.
+
 ## Design decisions worth knowing before extending this
 
 These are the places where turning the proposal into runnable code required a

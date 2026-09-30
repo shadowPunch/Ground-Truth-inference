@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from biasneut.common import tracking
 from biasneut.detector.infer import DetectorInference
 from biasneut.eval.fluency import FluencyResult, FluencyScorer
 from biasneut.eval.lexicon import LexiconBiasScorer
@@ -101,12 +103,48 @@ def build_markdown_report(results: dict[str, SystemEvalResult]) -> str:
     return header + sep + "\n".join(rows)
 
 
+def _finite_or_none(value: float) -> float | None:
+    return value if math.isfinite(value) else None
+
+
+def _log_evaluation(tracker: tracking.Tracker, results: dict[str, SystemEvalResult],
+                    comparisons: dict[str, dict], output_dir: Path) -> None:
+    metric_keys = [k for k in next(iter(results.values())).summary() if k != "name"]
+    rows = []
+    for name, r in results.items():
+        s = r.summary()
+        # Non-finite perplexity = empty or 1-token output, i.e. a degenerate generation.
+        n_degenerate = sum(not math.isfinite(p) for p in r.fluency.perplexities)
+        rows.append([name] + [_finite_or_none(s[k]) for k in metric_keys] + [n_degenerate])
+        tracker.set_summary(**{f"{name}/{k}": _finite_or_none(s[k]) for k in metric_keys},
+                            **{f"{name}/n_degenerate": n_degenerate})
+    tracker.log_table("eval/systems", ["system"] + metric_keys + ["n_degenerate"], rows)
+    tracker.log_table(
+        "eval/significance",
+        ["system", "baseline", "mcnemar_p", "mcnemar_stat", "sbert_mean", "sbert_ci_lo", "sbert_ci_hi"],
+        [[c["system"], c["baseline"], c["mcnemar_transfer_p_value"], c["mcnemar_statistic"],
+          c["sbert_cosine_mean"], *c["sbert_cosine_ci"]] for c in comparisons.values()],
+    )
+    tracker.log_image("eval/pareto", output_dir / "pareto.png")
+    tracker.set_summary(n_test_sentences=len(next(iter(results.values())).fluency.perplexities))
+
+
 def run_full_evaluation(
     results: dict[str, SystemEvalResult],
     output_dir: str | Path,
     baseline_name: str = "copy_input",
 ) -> None:
-    output_dir = Path(output_dir)
+    with tracking.run(name="eval", job_type="eval",
+                      config={"systems": list(results), "baseline": baseline_name}) as tracker:
+        _run_full_evaluation(results, Path(output_dir), baseline_name, tracker)
+
+
+def _run_full_evaluation(
+    results: dict[str, SystemEvalResult],
+    output_dir: Path,
+    baseline_name: str,
+    tracker: tracking.Tracker,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     report = build_markdown_report(results)
@@ -127,4 +165,5 @@ def run_full_evaluation(
 
     summaries = {name: r.summary() for name, r in results.items()}
     (output_dir / "summaries.json").write_text(json.dumps(summaries, indent=2))
+    _log_evaluation(tracker, results, comparisons, output_dir)
     logger.info("Evaluation report written to %s", output_dir)

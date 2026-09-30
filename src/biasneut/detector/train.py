@@ -1,6 +1,7 @@
 """Stage-1 detector training loop (§5.1, §7.4 checkpoint/resume discipline)."""
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from biasneut.common.compute import (
     get_device,
     resolve_dtype,
 )
+from biasneut.common import tracking
 from biasneut.common.config import DetectorConfig
 from biasneut.data.collate import DetectorCollator
 from biasneut.data.schema import DetectionExample
@@ -55,6 +57,23 @@ def train_detector(
     dev_examples: list[DetectionExample],
     cfg: DetectorConfig,
     resume: bool = True,
+) -> BiasDetector:
+    config = {
+        **dataclasses.asdict(cfg),
+        "n_train": len(train_examples),
+        "n_dev": len(dev_examples),
+        "n_train_biased": sum(e.is_biased for e in train_examples),
+    }
+    with tracking.run(name=Path(cfg.output_dir).name, job_type="train-detector", config=config) as tracker:
+        return _train_detector(train_examples, dev_examples, cfg, resume, tracker)
+
+
+def _train_detector(
+    train_examples: list[DetectionExample],
+    dev_examples: list[DetectionExample],
+    cfg: DetectorConfig,
+    resume: bool,
+    tracker: tracking.Tracker,
 ) -> BiasDetector:
     device = get_device()
     dtype = resolve_dtype(cfg.compute.mixed_precision)
@@ -106,6 +125,11 @@ def train_detector(
                 scheduler.step()
                 optimizer.zero_grad()
                 global_step += 1
+                tracker.log(
+                    {"train/loss": loss.item() * cfg.compute.gradient_accumulation_steps,
+                     "train/lr": scheduler.get_last_lr()[0], "epoch": epoch},
+                    step=global_step,
+                )
 
                 if global_step % cfg.checkpoint_every_steps == 0:
                     ckpt_mgr.save(
@@ -117,6 +141,8 @@ def train_detector(
         skip_steps = 0
         metrics = evaluate(model, dev_loader, device)
         logger.info("epoch %d dev metrics: %s", epoch, metrics)
+        tracker.log({**{f"dev/{k}": v for k, v in metrics.items()}, "epoch": epoch}, step=global_step)
+        tracker.set_summary(**{f"final_dev/{k}": v for k, v in metrics.items()})
         ckpt_mgr.save(
             global_step, model, optimizer, scheduler,
             TrainingState(step=global_step, epoch=epoch + 1, data_cursor={"epoch": epoch + 1, "step_in_epoch": 0},

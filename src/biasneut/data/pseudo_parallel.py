@@ -160,6 +160,24 @@ def filter_pseudo_parallel(
     return kept
 
 
+def log_generation_stats(tracker, n_sources: int, pairs: list[EditExample],
+                         kept: list[EditExample], sample_size: int = 50, seed: int = 42) -> None:
+    """Record generation/filtering yield (overall and per LLM) plus a sample of kept pairs."""
+    stats = {
+        "pseudo_parallel/n_sources": n_sources,
+        "pseudo_parallel/n_generated": len(pairs),
+        "pseudo_parallel/n_kept": len(kept),
+        "pseudo_parallel/keep_rate": len(kept) / len(pairs) if pairs else 0.0,
+    }
+    for provenance in sorted({p.provenance for p in pairs}):
+        stats[f"pseudo_parallel/n_kept/{provenance}"] = sum(p.provenance == provenance for p in kept)
+    tracker.log(stats)
+    tracker.set_summary(**stats)
+    sample = random.Random(seed).sample(kept, k=min(sample_size, len(kept)))
+    tracker.log_table("pseudo_parallel/kept_sample", ["source", "target", "provenance"],
+                      [[p.source, p.target, p.provenance] for p in sample])
+
+
 def sample_for_human_review(pairs: list[EditExample], n: int = 200, seed: int = 42,
                              out_path: str | Path = "human_review_sample.csv") -> Path:
     sample = random.Random(seed).sample(pairs, k=min(n, len(pairs)))

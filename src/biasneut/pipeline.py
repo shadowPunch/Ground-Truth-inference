@@ -65,6 +65,21 @@ class BiasNeutralizationPipeline:
         return results
 
 
+def log_results(tracker, results: list[PipelineResult]) -> None:
+    """Record an inference run's inputs/outputs and how many sentences were flagged and changed."""
+    tracker.log_table(
+        "inference/outputs",
+        ["source", "neutralized", "was_flagged_biased", "bias_prob", "flagged_span"],
+        [[r.source, r.neutralized, r.was_flagged_biased, r.bias_prob, r.flagged_span] for r in results],
+    )
+    tracker.set_summary(
+        n_inputs=len(results),
+        n_flagged=sum(r.was_flagged_biased for r in results),
+        n_changed=sum(r.neutralized != r.source for r in results),
+        n_empty_output=sum(not r.neutralized.strip() for r in results),
+    )
+
+
 class MaskInfillEditorAdapter:
     """Adapts ``MaskInfiller.infill`` (single sentence at a time, no beam
     search) to the batched ``Editor`` protocol so it can drive the same

@@ -4,7 +4,9 @@ which `EditExample`s are passed in and whether a checkpoint is used to warm
 start (§5.2, §7.4)."""
 from __future__ import annotations
 
+import dataclasses
 import logging
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
@@ -18,6 +20,7 @@ from biasneut.common.compute import (
     get_device,
     resolve_dtype,
 )
+from biasneut.common import tracking
 from biasneut.common.config import EditorConfig
 from biasneut.data.schema import EditExample
 from biasneut.editor.collate import EditorCollator
@@ -54,6 +57,25 @@ def train_seq2seq_editor(
             "check the detector's span recall before assuming this is a data bug."
         )
 
+    config = {
+        **dataclasses.asdict(cfg),
+        "n_train": len(train_examples),
+        "n_dev": len(dev_examples),
+        "warm_start": editor is not None,
+        "strategies": sorted({e.strategy for e in train_examples}),
+    }
+    with tracking.run(name=Path(cfg.output_dir).name, job_type="train-editor", config=config) as tracker:
+        return _train_seq2seq_editor(train_examples, dev_examples, cfg, editor, resume, tracker)
+
+
+def _train_seq2seq_editor(
+    train_examples: list[EditExample],
+    dev_examples: list[EditExample],
+    cfg: EditorConfig,
+    editor: SeqEditor | None,
+    resume: bool,
+    tracker: tracking.Tracker,
+) -> SeqEditor:
     device = get_device()
     dtype = resolve_dtype(cfg.compute.mixed_precision)
 
@@ -106,6 +128,11 @@ def train_seq2seq_editor(
                 scheduler.step()
                 optimizer.zero_grad()
                 global_step += 1
+                tracker.log(
+                    {"train/loss": loss.item() * cfg.compute.gradient_accumulation_steps,
+                     "train/lr": scheduler.get_last_lr()[0], "epoch": epoch},
+                    step=global_step,
+                )
 
                 if global_step % cfg.checkpoint_every_steps == 0:
                     ckpt_mgr.save(
@@ -117,6 +144,8 @@ def train_seq2seq_editor(
         skip_steps = 0
         dev_loss = evaluate_loss(editor, dev_loader, device)
         logger.info("epoch %d dev loss: %.4f", epoch, dev_loss)
+        tracker.log({"dev/loss": dev_loss, "epoch": epoch}, step=global_step)
+        tracker.set_summary(final_dev_loss=dev_loss)
         ckpt_mgr.save(
             global_step, editor.model, optimizer, scheduler,
             TrainingState(step=global_step, epoch=epoch + 1, data_cursor={"epoch": epoch + 1, "step_in_epoch": 0},
